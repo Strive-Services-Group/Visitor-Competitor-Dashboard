@@ -621,13 +621,34 @@
       <div style="margin-left:auto; display:flex; gap:6px;">
         <button class="btn ghost" style="background:#94A3B8; padding:6px 10px; font-size:12px;" onclick="clearAllSnapshots()" title="Erase all stored weekly snapshots">🗑 Clear History</button>
         <button class="btn" style="padding:6px 12px; font-size:12px;" onclick="exportAllBuckets()">📥 Export All Buckets</button>
-        <button class="btn" style="padding:6px 12px; font-size:12px;" onclick="exportBucketsJson()" title="Download shared weekly history to commit to the repo (buckets.json)">📤 buckets.json</button>
       </div>
     </div>
   </div>
 
   <!-- 7 BUCKET CARDS IN ONE ROW -->
   <div id="bucketGrid2" class="bucket-row"></div>
+
+  <div class="card" style="padding:14px 16px; margin:12px 0;">
+    <style>
+      #unitMatrixTable{width:100%;border-collapse:collapse;font-size:12px;}
+      #unitMatrixTable th,#unitMatrixTable td{border-bottom:1px solid #eef1f5;padding:6px 8px;text-align:center;white-space:nowrap;}
+      #unitMatrixTable th{position:sticky;top:0;background:#fff;z-index:2;font-size:11px;color:#5a6b7d;}
+      #unitMatrixTable tr.umrow:hover td{background:#f3f8ff !important;}
+      .drill-tbl{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:6px;}
+      .drill-tbl th,.drill-tbl td{border-bottom:1px solid #eef1f5;padding:5px 8px;text-align:left;}
+      .drill-tbl th{background:#f4f6f9;color:#5a6b7d;font-size:11px;position:sticky;top:0;}
+    </style>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
+      <div class="section-title" style="margin:0;">📋 Unit Bucket Movement</div>
+      <input id="unitMatrixSearch" oninput="renderUnitMatrix()" placeholder="Search Building / Unit…" style="padding:6px 10px;border:1px solid #d6deea;border-radius:8px;font-size:12px;min-width:230px;">
+      <label style="font-size:12px;display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" id="unitMatrixMoversOnly" onchange="renderUnitMatrix()"> Movers only</label>
+      <span id="unitMatrixMeta" style="margin-left:auto;font-size:12px;color:var(--muted);"></span>
+    </div>
+    <div style="overflow:auto;max-height:540px;border:1px solid #eef1f5;border-radius:8px;">
+      <table id="unitMatrixTable"></table>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:6px;">Solid dot = current bucket · hollow dot = previous bucket · highlighted row = moved since the last committed baseline. Click any unit for its full visit &amp; opportunity history. (C Aging is an overlay, so it is excluded from the columns.)</div>
+  </div>
 
   <!-- UNIT ANALYSIS (moved from Tab 1) -->
   <div class="section-title" style="margin-top:24px;">Unit Analysis — Loyalty &amp; Shared Footprint</div>
@@ -824,9 +845,6 @@ function loadSnapshots() {
       try { all[k.slice(SNAPSHOT_PREFIX.length)] = JSON.parse(localStorage.getItem(k)); }
       catch(e) {}
     }
-  }
-  if (typeof OPP_CENTRAL_SNAPS !== 'undefined' && OPP_CENTRAL_SNAPS) {
-    for (var _wk in OPP_CENTRAL_SNAPS) { all[_wk] = OPP_CENTRAL_SNAPS[_wk]; }
   }
   return all;
 }
@@ -1330,6 +1348,7 @@ function renderSegBuckets() {
       </div>
     </div>`;
   }).join('');
+  try { if (typeof renderUnitMatrix === 'function') renderUnitMatrix(); } catch (e) {}
 }
 
 function showSegDrill(key) {
@@ -2385,6 +2404,7 @@ async function loadLiveOpportunities() {
     guard++;
   }
   const per = {};
+  OPP_RAW_BY_UNIT = {};
   for (const o of recs) {
     const b = o['_ssg_building_value' + F] || '', u = o['_ssg_unit_value' + F] || '';
     if (!b && !u) continue;
@@ -2395,6 +2415,7 @@ async function loadLiveOpportunities() {
     if (o.createdon) { const d = new Date(new Date(o.createdon).getTime() + 4 * 3600 * 1000); ds = d.toISOString().slice(0, 10); }
     if (!per[key]) per[key] = { w: 0, n: 0, t: 0, lw: '', ew: '', wd: [], nd: [], _wd: new Set(), _nd: new Set() };
     const e = per[key]; e.t++;
+    (OPP_RAW_BY_UNIT[key] = OPP_RAW_BY_UNIT[key] || []).push({ date: ds, dept: dept, gate: gate, won: gate === OPP_WON_GATE });
     if (gate === OPP_WON_GATE) {
       e.w++;
       if (ds) { if (!e.lw || ds > e.lw) e.lw = ds; if (!e.ew || ds < e.ew) e.ew = ds; }
@@ -2437,23 +2458,112 @@ function loadCentralData() {
 }
 
 var OPP_CENTRAL_SNAPS = {};
+var OPP_BASELINE_UNITS = {};
+var OPP_RAW_BY_UNIT = {};
 function loadCentralSnapshots() {
-  // Shared weekly bucket history committed to the repo, so Last Week / Last Two Week
-  // values are identical for every viewer (not each browser's own localStorage).
+  // Shared bucket history committed to the repo: weekly counts (Last Week / Last Two Week)
+  // plus a per-unit baseline (_units) used for day-over-day movement arrows. Same for everyone.
   fetch('buckets.json?t=' + Date.now()).then(function (r) { if (!r.ok) throw 0; return r.json(); })
     .then(function (j) {
-      OPP_CENTRAL_SNAPS = j || {};
+      j = j || {};
+      OPP_BASELINE_UNITS = j._units || {};
+      var snaps = {};
+      for (var k in j) { if (k.charAt(0) !== '_') snaps[k] = j[k]; }
+      OPP_CENTRAL_SNAPS = snaps;
       try { if (typeof renderSegBuckets === 'function') renderSegBuckets(); } catch (e) {}
+      try { if (typeof renderUnitMatrix === 'function') renderUnitMatrix(); } catch (e) {}
     }).catch(function () {});
 }
 function exportBucketsJson() {
   var all = (typeof loadSnapshots === 'function') ? loadSnapshots() : {};
+  var units = {};
+  if (typeof SEG_META !== 'undefined') { for (var _u in SEG_META) { units[_u] = SEG_META[_u].bucket; } }
+  all._units = units;
+  all._unitsDate = (typeof fmtDate === 'function') ? fmtDate(new Date()) : new Date().toISOString().slice(0,10);
   var blob = new Blob([JSON.stringify(all, null, 2)], { type: 'application/json' });
   var url = URL.createObjectURL(blob);
   var a = document.createElement('a');
   a.href = url; a.download = 'buckets.json'; a.click();
   URL.revokeObjectURL(url);
   if (typeof toast === 'function') toast('Downloaded buckets.json - commit it to the repo to share history with everyone', 'ok');
+}
+
+function renderUnitMatrix() {
+  var tbl = document.getElementById('unitMatrixTable');
+  if (!tbl || typeof SEG_META === 'undefined') return;
+  var COLS = ['A+','A','B','D','E','F'];
+  var colDef = {};
+  if (typeof SEG_DEFS !== 'undefined') SEG_DEFS.forEach(function (d) { colDef[d.k] = d; });
+  var units = Object.keys(SEG_META).sort(function (a, b) {
+    return (SEG_META[a].building || '').localeCompare(SEG_META[b].building || '') || a.localeCompare(b);
+  });
+  var sEl = document.getElementById('unitMatrixSearch');
+  var search = (sEl && sEl.value ? sEl.value : '').trim().toLowerCase();
+  var mEl = document.getElementById('unitMatrixMoversOnly');
+  var moversOnly = mEl && mEl.checked;
+  var moved = 0, shown = 0;
+  var head = '<thead><tr><th style="text-align:left;position:sticky;left:0;background:#fff;z-index:3;">Building / Unit</th>' +
+    COLS.map(function (k) { var d = colDef[k] || {}; return '<th style="color:' + (d.color || '#555') + '">' + k + '</th>'; }).join('') +
+    '<th>Change</th></tr></thead>';
+  var body = '';
+  units.forEach(function (u) {
+    var cur = SEG_META[u].bucket;
+    var base = OPP_BASELINE_UNITS ? OPP_BASELINE_UNITS[u] : undefined;
+    var isMoved = base && base !== cur && COLS.indexOf(base) >= 0 && COLS.indexOf(cur) >= 0;
+    if (isMoved) moved++;
+    if (moversOnly && !isMoved) return;
+    if (search && u.toLowerCase().indexOf(search) < 0) return;
+    shown++;
+    var cells = COLS.map(function (k) {
+      var d = colDef[k] || {};
+      if (k === cur) return '<td><span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:' + (d.color || '#555') + '"></span></td>';
+      if (isMoved && k === base) return '<td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid ' + (d.color || '#999') + ';opacity:.55"></span></td>';
+      return '<td></td>';
+    }).join('');
+    var change = isMoved
+      ? '<span style="font-weight:700;color:' + ((colDef[cur] || {}).color || '#333') + '">' + base + ' &rarr; ' + cur + '</span>'
+      : '<span style="color:#9aa7b5;">&mdash;</span>';
+    var rowbg = isMoved ? '#FFF7E6' : '#fff';
+    body += '<tr class="umrow" style="cursor:pointer;background:' + (isMoved ? '#FFF7E6' : 'transparent') + ';" data-u="' + escHtml(u) + '" onclick="openUnitDrill(this.getAttribute(\'data-u\'))">' +
+      '<td style="text-align:left;position:sticky;left:0;background:' + rowbg + ';font-size:12px;font-weight:600;">' + escHtml(u) + '</td>' +
+      cells + '<td style="font-size:12px;">' + change + '</td></tr>';
+  });
+  tbl.innerHTML = head + '<tbody>' + body + '</tbody>';
+  var meta = document.getElementById('unitMatrixMeta');
+  if (meta) meta.textContent = shown.toLocaleString() + ' shown · ' + moved.toLocaleString() + ' moved · ' + units.length.toLocaleString() + ' total';
+}
+
+function openUnitDrill(u) {
+  if (!u || typeof openModal !== 'function') return;
+  var m = (typeof SEG_META !== 'undefined' && SEG_META[u]) ? SEG_META[u] : {};
+  var cur = m.bucket || '-';
+  var base = (typeof OPP_BASELINE_UNITS !== 'undefined') ? OPP_BASELINE_UNITS[u] : undefined;
+  var movedHtml = (base && base !== cur) ? '<span style="font-weight:700;color:#145A95">' + base + ' &rarr; ' + cur + '</span>' : 'No change (' + cur + ')';
+  var visits = (typeof DATA !== 'undefined' ? DATA : []).filter(function (r) { return r.unit === u; })
+    .sort(function (a, b) { return (b.date || '').localeCompare(a.date || ''); });
+  var vrows = visits.map(function (r) {
+    var mine = (typeof MY_COMPANY !== 'undefined' && r.company === MY_COMPANY);
+    return '<tr><td>' + escHtml(r.date || '') + '</td><td>' + escHtml(r.time || '') + '</td><td style="' + (mine ? 'color:#2E8B57;font-weight:600' : '') + '">' + escHtml(r.company || '') + '</td><td>' + escHtml(r.purpose || '') + '</td><td>' + escHtml(r.gate || '') + '</td></tr>';
+  }).join('') || '<tr><td colspan="5" style="color:#9aa7b5;">No visits recorded</td></tr>';
+  var opps = (typeof OPP_RAW_BY_UNIT !== 'undefined' ? (OPP_RAW_BY_UNIT[u] || []) : []).slice()
+    .sort(function (a, b) { return (b.date || '').localeCompare(a.date || ''); });
+  var orows = opps.map(function (o) {
+    return '<tr><td>' + escHtml(o.date || '') + '</td><td>' + escHtml(o.dept || '') + '</td><td>' + escHtml(o.gate || '') + '</td><td>' + (o.won ? '<span style="color:#2E8B57;font-weight:700">Won</span>' : '<span style="color:#C0392B">No</span>') + '</td></tr>';
+  }).join('') || '<tr><td colspan="4" style="color:#9aa7b5;">No opportunities</td></tr>';
+  var html =
+    '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-size:13px;">' +
+      '<div><strong>Building:</strong> ' + escHtml(m.building || '') + '</div>' +
+      '<div><strong>Current bucket:</strong> ' + escHtml(cur) + '</div>' +
+      '<div><strong>Movement:</strong> ' + movedHtml + '</div>' +
+      '<div><strong>S&amp;C visits:</strong> ' + (m.scVisits || 0) + '</div>' +
+      '<div><strong>Competitor visits:</strong> ' + (m.compVisits || 0) + '</div>' +
+      '<div><strong>Opportunities:</strong> ' + (m.totalOpps || 0) + ' (' + (m.wonOpps || 0) + ' won)</div>' +
+    '</div>' +
+    '<h3 style="margin:12px 0 6px;font-size:14px;">Visit history (' + visits.length + ')</h3>' +
+    '<table class="drill-tbl"><thead><tr><th>Date</th><th>Time</th><th>Company</th><th>Purpose</th><th>Check-in Gate</th></tr></thead><tbody>' + vrows + '</tbody></table>' +
+    '<h3 style="margin:16px 0 6px;font-size:14px;">Opportunity history (' + opps.length + ')</h3>' +
+    '<table class="drill-tbl"><thead><tr><th>Created</th><th>Department</th><th>Quote Gate</th><th>Won?</th></tr></thead><tbody>' + orows + '</tbody></table>';
+  openModal('Unit · ' + u, html);
 }
 
 function ensureOppGate() {
