@@ -621,6 +621,7 @@
       <div style="margin-left:auto; display:flex; gap:6px;">
         <button class="btn ghost" style="background:#94A3B8; padding:6px 10px; font-size:12px;" onclick="clearAllSnapshots()" title="Erase all stored weekly snapshots">🗑 Clear History</button>
         <button class="btn" style="padding:6px 12px; font-size:12px;" onclick="exportAllBuckets()">📥 Export All Buckets</button>
+        <button class="btn" style="padding:6px 12px; font-size:12px;" onclick="exportBucketsJson()" title="Download shared weekly history to commit to the repo (buckets.json)">📤 buckets.json</button>
       </div>
     </div>
   </div>
@@ -764,6 +765,7 @@ window.addEventListener('DOMContentLoaded', () => {
     else { loadData(filterToBalqis(EMBEDDED_DATA, 'vms'), 'Embedded snapshot'); }
   } catch(e){ loadData(filterToBalqis(EMBEDDED_DATA, 'vms'), 'Embedded snapshot'); }
   loadCentralData();
+  loadCentralSnapshots();
 });
 
 /* ============================================================
@@ -822,6 +824,9 @@ function loadSnapshots() {
       try { all[k.slice(SNAPSHOT_PREFIX.length)] = JSON.parse(localStorage.getItem(k)); }
       catch(e) {}
     }
+  }
+  if (typeof OPP_CENTRAL_SNAPS !== 'undefined' && OPP_CENTRAL_SNAPS) {
+    for (var _wk in OPP_CENTRAL_SNAPS) { all[_wk] = OPP_CENTRAL_SNAPS[_wk]; }
   }
   return all;
 }
@@ -2429,6 +2434,26 @@ function loadCentralData() {
   fetch('visitor.xlsx' + bust).then(function (r) { if (!r.ok) throw 0; return r.blob(); })
     .then(function (b) { try { handleFile(new File([b], 'visitor.xlsx')); } catch (e) {} })
     .catch(function () {});
+}
+
+var OPP_CENTRAL_SNAPS = {};
+function loadCentralSnapshots() {
+  // Shared weekly bucket history committed to the repo, so Last Week / Last Two Week
+  // values are identical for every viewer (not each browser's own localStorage).
+  fetch('buckets.json?t=' + Date.now()).then(function (r) { if (!r.ok) throw 0; return r.json(); })
+    .then(function (j) {
+      OPP_CENTRAL_SNAPS = j || {};
+      try { if (typeof renderSegBuckets === 'function') renderSegBuckets(); } catch (e) {}
+    }).catch(function () {});
+}
+function exportBucketsJson() {
+  var all = (typeof loadSnapshots === 'function') ? loadSnapshots() : {};
+  var blob = new Blob([JSON.stringify(all, null, 2)], { type: 'application/json' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = 'buckets.json'; a.click();
+  URL.revokeObjectURL(url);
+  if (typeof toast === 'function') toast('Downloaded buckets.json - commit it to the repo to share history with everyone', 'ok');
 }
 
 function ensureOppGate() {
