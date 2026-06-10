@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Visitor &amp; Competitor Intelligence Dashboard — S &amp; C Building Maintenance</title>
+<title>Visitor &amp; Competitor Dashboard</title>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -749,14 +749,21 @@ window.addEventListener('DOMContentLoaded', () => {
   initSplash();
   setupUpload();
   setupFilters();
-  // Load all 3 embedded datasets, then apply Balqis project filter
-  LOC_DATA = filterToBalqis(EMBEDDED_LOCATIONS || [], 'loc');
+  try {
+    var _sl = JSON.parse(localStorage.getItem('VBD_LOC_DATA')||'null');
+    if (_sl && _sl.recs) { LOC_DATA = filterToBalqis(_sl.recs,'loc'); document.getElementById('locLastLoaded').textContent = _sl.name||'Saved'; }
+    else { LOC_DATA = filterToBalqis(EMBEDDED_LOCATIONS || [], 'loc'); document.getElementById('locLastLoaded').textContent = 'Embedded'; }
+  } catch(e){ LOC_DATA = filterToBalqis(EMBEDDED_LOCATIONS || [], 'loc'); document.getElementById('locLastLoaded').textContent = 'Embedded'; }
   OPP_DATA = filterToBalqis(EMBEDDED_OPPS || {}, 'opp');
-  document.getElementById('locLastLoaded').textContent = 'Embedded';
   document.getElementById('locRecordCount').textContent = LOC_DATA.length.toLocaleString();
   document.getElementById('oppLastLoaded').textContent = 'Embedded';
   document.getElementById('oppRecordCount').textContent = Object.values(OPP_DATA).reduce((s,e)=>s+(e.t||0),0).toLocaleString();
-  loadData(filterToBalqis(EMBEDDED_DATA, 'vms'), 'Embedded snapshot');
+  try {
+    var _sv = JSON.parse(localStorage.getItem('VBD_VMS_DATA')||'null');
+    if (_sv && _sv.recs) { loadData(filterToBalqis(_sv.recs,'vms'), _sv.name||'Saved'); }
+    else { loadData(filterToBalqis(EMBEDDED_DATA, 'vms'), 'Embedded snapshot'); }
+  } catch(e){ loadData(filterToBalqis(EMBEDDED_DATA, 'vms'), 'Embedded snapshot'); }
+  loadCentralData();
 });
 
 /* ============================================================
@@ -964,6 +971,7 @@ function handleLocFile(file) {
       }
       const balqisLocs = filterToBalqis(locs, 'loc');
       LOC_DATA = balqisLocs;
+      try{localStorage.setItem('VBD_LOC_DATA',JSON.stringify({name:file.name,recs:balqisLocs}));}catch(e){}
       document.getElementById('locLastLoaded').textContent = file.name;
       document.getElementById('locRecordCount').textContent = balqisLocs.length.toLocaleString();
       recomputeAll();
@@ -1086,6 +1094,7 @@ function handleFile(file) {
       if (records.length === 0) { toast('No records parsed', 'error'); return; }
       const balqis = filterToBalqis(records, 'vms');
       loadData(balqis, file.name);
+      try{localStorage.setItem('VBD_VMS_DATA',JSON.stringify({name:file.name,recs:balqis}));}catch(e){}
       toast(`Loaded ${records.length} records → ${balqis.length} Balqis-only`, 'ok');
     } catch (err) {
       console.error(err);
@@ -1096,6 +1105,8 @@ function handleFile(file) {
 }
 
 function resetToEmbedded() {
+  if (!confirm('Reset to the built-in sample snapshot? This discards your uploaded VMS & Locations data.')) return;
+  try{localStorage.removeItem('VBD_VMS_DATA');localStorage.removeItem('VBD_LOC_DATA');}catch(e){}
   LOC_DATA = filterToBalqis(EMBEDDED_LOCATIONS || [], 'loc');
   OPP_DATA = filterToBalqis(EMBEDDED_OPPS || {}, 'opp');
   document.getElementById('locLastLoaded').textContent = 'Embedded';
@@ -2397,6 +2408,7 @@ async function loadLiveOpportunities() {
   const orc = document.getElementById('oppRecordCount'); if (orc) orc.textContent = totalRows.toLocaleString();
   recomputeAll();
   setLiveOppStatus('live ' + stamp, '#2E8B57');
+  hideOppGate();
   if (typeof toast === 'function') toast('Live Opportunities: ' + Object.keys(balqisPer).length + ' units, ' + totalRows.toLocaleString() + ' opps', 'ok');
 }
 
@@ -2407,14 +2419,107 @@ function startOppAutoRefresh() {
   }, OPP_REFRESH_MS);
 }
 
-function beginOppSignIn() {
+function loadCentralData() {
+  // Shared datasets committed to the repo override per-browser uploads, so one
+  // file update shows the latest data to everyone. Cache-busted to always get latest.
+  var bust = '?t=' + Date.now();
+  fetch('locations.xlsx' + bust).then(function (r) { if (!r.ok) throw 0; return r.blob(); })
+    .then(function (b) { try { handleLocFile(new File([b], 'locations.xlsx')); } catch (e) {} })
+    .catch(function () {});
+  fetch('visitor.xlsx' + bust).then(function (r) { if (!r.ok) throw 0; return r.blob(); })
+    .then(function (b) { try { handleFile(new File([b], 'visitor.xlsx')); } catch (e) {} })
+    .catch(function () {});
+}
+
+function ensureOppGate() {
+  if (document.getElementById('oppLoginGate')) return;
+  if (!document.getElementById('oppGateStyle')) {
+    var st = document.createElement('style');
+    st.id = 'oppGateStyle';
+    st.textContent =
+      '#oppLoginGate{position:fixed;inset:0;z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;background:radial-gradient(120% 120% at 50% 0%,#11305a 0%,#0a1830 55%,#060d1c 100%);color:#eaf2fb;font-family:Montserrat,Segoe UI,system-ui,sans-serif;text-align:center;padding:24px;overflow:hidden;}' +
+      '#oppLoginGate .ogstreak{position:absolute;top:-20%;width:2px;border-radius:2px;animation-name:ogfall;animation-timing-function:linear;animation-iteration-count:infinite;will-change:transform,opacity;}' +
+      '@keyframes ogfall{0%{transform:translateY(-25vh);opacity:0}8%{opacity:.8}92%{opacity:.8}100%{transform:translateY(135vh);opacity:0}}' +
+      '#oppLoginGate .ogring{position:absolute;width:520px;height:520px;border:1px solid rgba(90,160,224,.12);border-radius:50%;pointer-events:none;}' +
+      '#oppLoginGate .ogring.b{width:680px;height:680px;border-color:rgba(90,160,224,.07);}' +
+      '#oppLoginGate .ogcard{position:relative;background:rgba(255,255,255,.045);border:1px solid rgba(120,160,210,.22);border-radius:18px;padding:26px 36px 30px;max-width:440px;width:92%;box-shadow:0 20px 60px rgba(0,0,0,.45);backdrop-filter:blur(4px);}' +
+      '#oppLoginGate .oglogo{background:#fff;border-radius:16px;padding:14px 24px 11px;display:inline-block;margin-bottom:22px;box-shadow:0 10px 30px rgba(0,0,0,.35);}' +
+      '#oppLoginGate .ogkick{color:#5aa0e0;letter-spacing:6px;font-size:11px;font-weight:700;margin-bottom:10px;}' +
+      '#oppLoginGate h1{font-family:Montserrat,sans-serif;font-size:30px;font-weight:800;line-height:1.12;margin:0 0 10px;color:#fff;letter-spacing:.5px;}' +
+      '#oppLoginGate .ogsub{color:#9fb6d4;font-size:13px;margin-bottom:24px;}' +
+      '#oppGateBtn{width:100%;border:none;border-radius:12px;padding:15px;font-size:15px;font-weight:700;letter-spacing:1.5px;color:#fff;cursor:pointer;background:linear-gradient(135deg,#2f7de0,#1657c8);box-shadow:0 12px 28px rgba(30,90,200,.45);transition:transform .12s,box-shadow .12s;}' +
+      '#oppGateBtn:hover{transform:translateY(-1px);box-shadow:0 16px 36px rgba(30,90,200,.65);}' +
+      '#oppLoginGate .ogms{margin-top:14px;font-size:12px;color:#b9cae3;display:flex;align-items:center;justify-content:center;gap:7px;}' +
+      '#oppLoginGate .ogsec{margin-top:6px;font-size:11px;color:#7d93b3;}' +
+      '#oppLoginGate .ogbadges{margin-top:18px;display:flex;gap:8px;justify-content:center;}' +
+      '#oppLoginGate .ogbadge{font-size:10px;letter-spacing:1px;color:#9fb6d4;border:1px solid rgba(120,160,210,.3);border-radius:20px;padding:5px 12px;}' +
+      '#oppGateMsg{min-height:15px;margin-top:12px;font-size:12px;color:#ffd27d;}' +
+      '#oppLoginGate .ogfoot{position:absolute;bottom:22px;left:0;right:0;color:#6f86a6;font-size:11px;}' +
+      '#oppLoginGate .ogtag{color:#e8a33d;letter-spacing:7px;font-size:12px;font-weight:700;margin-top:8px;}';
+    document.head.appendChild(st);
+  }
+  var g = document.createElement('div');
+  g.id = 'oppLoginGate';
+  var streaks = '';
+  for (var i = 0; i < 22; i++) {
+    var gold = (i % 4 === 0);
+    var col = gold ? 'rgba(232,163,61,' : 'rgba(70,140,225,';
+    var h = 70 + Math.floor(Math.random() * 170);
+    var dur = (3 + Math.random() * 4).toFixed(2);
+    var dl = (Math.random() * 6).toFixed(2);
+    var lf = (Math.random() * 100).toFixed(2);
+    streaks += '<div class="ogstreak" style="left:' + lf + '%;height:' + h + 'px;background:linear-gradient(180deg,rgba(0,0,0,0),' + col + '0.85),rgba(0,0,0,0));animation-duration:' + dur + 's;animation-delay:' + dl + 's"></div>';
+  }
+  g.innerHTML = streaks +
+    '<div class="ogring"></div><div class="ogring b"></div>' +
+    '<div class="ogcard">' +
+      '<div class="oglogo">' +
+        '<svg width="60" height="32" viewBox="0 0 60 32"><g fill="#0f3b6b">' +
+        '<path d="M8 2 L20 2 L13 30 L1 30 Z" opacity=".5"/><path d="M24 2 L36 2 L29 30 L17 30 Z" opacity=".78"/><path d="M40 2 L52 2 L45 30 L33 30 Z"/></g></svg>' +
+        '<div style="color:#0f3b6b;font-weight:800;letter-spacing:3px;font-size:15px;margin-top:3px;">STRIVE</div>' +
+        '<div style="color:#5aa0e0;font-weight:600;letter-spacing:3px;font-size:8px;">SERVICES GROUP</div>' +
+      '</div>' +
+      '<div class="ogkick">RACE CONTROL</div>' +
+      '<h1>Visitor &amp; Competitor<br>Dashboard</h1>' +
+      '<div class="ogsub">Secure access for authorised personnel</div>' +
+      '<button id="oppGateBtn">&rarr;&nbsp;&nbsp;SIGN IN</button>' +
+      '<div class="ogms"><svg width="14" height="14" viewBox="0 0 23 23"><path fill="#f25022" d="M1 1h10v10H1z"/><path fill="#7fba00" d="M12 1h10v10H12z"/><path fill="#00a4ef" d="M1 12h10v10H1z"/><path fill="#ffb900" d="M12 12h10v10H12z"/></svg> via Microsoft 365</div>' +
+      '<div class="ogsec">&#128274; Secured by Azure Active Directory</div>' +
+      '<div class="ogbadges"><span class="ogbadge">AZURE AD</span><span class="ogbadge">ENCRYPTED</span><span class="ogbadge">SSO</span></div>' +
+      '<div id="oppGateMsg"></div>' +
+    '</div>' +
+    '<div class="ogfoot">Palm Jumeirah, Dubai &middot; Strive Services Group<div class="ogtag">FOR EXCELLENCE WE STRIVE</div></div>';
+  document.body.appendChild(g);
+  g.querySelector('#oppGateBtn').addEventListener('click', function () {
+    var m = document.getElementById('oppGateMsg'); if (m) m.textContent = 'Redirecting to Microsoft sign-in...';
+    beginOppSignIn();
+  });
+}
+function showOppGate(msg) {
+  ensureOppGate();
+  var g = document.getElementById('oppLoginGate'); if (g) g.style.display = 'flex';
+  if (msg) { var m = document.getElementById('oppGateMsg'); if (m) m.textContent = msg; }
+}
+function hideOppGate() {
+  var g = document.getElementById('oppLoginGate'); if (g) g.style.display = 'none';
+}
+
+async function beginOppSignIn() {
   if (window.location.protocol === 'file:') {
+    var mf = document.getElementById('oppGateMsg');
+    if (mf) mf.textContent = 'Sign-in works only on the hosted https link, not a local file.';
     setLiveOppStatus('host me', '#C0392B');
-    if (typeof toast === 'function') toast('Live sign-in needs the hosted https URL, not a local file.', 'error');
     return;
   }
-  sessionStorage.setItem(OPP_INFLIGHT_KEY, '1');
-  oppMsalInstance.loginRedirect(OPP_LOGIN_REQUEST);
+  try {
+    if (!oppMsalInstance) await initOppMsal();
+    sessionStorage.setItem(OPP_INFLIGHT_KEY, '1');
+    await oppMsalInstance.loginRedirect(OPP_LOGIN_REQUEST);
+  } catch (e) {
+    console.error('Sign-in failed:', e);
+    var me = document.getElementById('oppGateMsg');
+    if (me) me.textContent = 'Sign-in error: ' + (e.message || e);
+  }
 }
 
 async function goLiveOpps() {
@@ -2435,26 +2540,24 @@ async function connectLiveOpps() {
 }
 
 window.addEventListener('load', function () {
-  setLiveOppStatus('connecting', '#E8A33D');
+  ensureOppGate();
   if (window.location.protocol === 'file:') {
+    showOppGate('Open this dashboard from its hosted https link to sign in.');
     setLiveOppStatus('host me', '#C0392B');
-    console.warn('Live Opps: open from the hosted https URL (same Static Web App as Grand Prix).');
     return;
   }
   initOppMsal().then(async function () {
     if (oppAccount) {
       try { await goLiveOpps(); }
       catch (e) {
-        if (e instanceof msal.InteractionRequiredAuthError) { beginOppSignIn(); }
-        else { console.warn('Live load failed:', e.message); setLiveOppStatus('retry', '#E8A33D'); }
+        if (e instanceof msal.InteractionRequiredAuthError) { showOppGate('Your session expired - click Sign in to continue.'); }
+        else { console.warn('Live load failed:', e.message); showOppGate('Could not load data - click Sign in to retry.'); }
       }
-    } else if (!sessionStorage.getItem(OPP_INFLIGHT_KEY)) {
-      beginOppSignIn();
     } else {
       sessionStorage.removeItem(OPP_INFLIGHT_KEY);
-      setLiveOppStatus('connect', '#E8A33D');
+      showOppGate();
     }
-  }).catch(function (e) { console.warn('MSAL init:', e.message); setLiveOppStatus('connect', '#E8A33D'); });
+  }).catch(function (e) { console.warn('MSAL init:', e.message); showOppGate('Sign-in unavailable - please retry.'); });
 });
 
 </script>
