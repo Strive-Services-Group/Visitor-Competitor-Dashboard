@@ -495,7 +495,7 @@
 <div class="header">
   <div class="header-inner">
     <div class="brand">
-      <div class="brand-logo">S&amp;C</div>
+      <div class="brand-logo" style="background:#fff;padding:5px 9px;display:flex;align-items:center;border-radius:8px;width:auto;"><img src="logo.png" alt="STRIVE" style="height:30px;width:auto;display:block;" onerror="this.style.display=&#39;none&#39;;this.parentNode.style.background=&#39;transparent&#39;;this.parentNode.textContent=&#39;S&amp;C&#39;;"></div>
       <div>
         <h1>Resident 360 / Visitor Dashboard</h1>
         <p>S &amp; C Building Maintenance L.L.C — Competitive Footprint Analysis</p>
@@ -2817,10 +2817,7 @@ function ensureOppGate() {
     '<div class="ogring"></div><div class="ogring b"></div>' +
     '<div class="ogcard">' +
       '<div class="oglogo">' +
-        '<svg width="60" height="32" viewBox="0 0 60 32"><g fill="#0f3b6b">' +
-        '<path d="M8 2 L20 2 L13 30 L1 30 Z" opacity=".5"/><path d="M24 2 L36 2 L29 30 L17 30 Z" opacity=".78"/><path d="M40 2 L52 2 L45 30 L33 30 Z"/></g></svg>' +
-        '<div style="color:#0f3b6b;font-weight:800;letter-spacing:3px;font-size:15px;margin-top:3px;">STRIVE</div>' +
-        '<div style="color:#5aa0e0;font-weight:600;letter-spacing:3px;font-size:8px;">SERVICES GROUP</div>' +
+        '<img src="logo.png" alt="STRIVE SERVICES GROUP" style="max-width:210px;width:100%;height:auto;display:block;" onerror="this.style.display=&#39;none&#39;">' +
       '</div>' +
       '<div class="ogkick">RACE CONTROL</div>' +
       '<h1>Visitor &amp; Competitor<br>Dashboard</h1>' +
@@ -2833,15 +2830,15 @@ function ensureOppGate() {
     '</div>' +
     '<div class="ogfoot">Palm Jumeirah, Dubai &middot; Strive Services Group<div class="ogtag">FOR EXCELLENCE WE STRIVE</div></div>';
   document.body.appendChild(g);
-  g.querySelector('#oppGateBtn').addEventListener('click', function () {
+  g.querySelector('#oppGateBtn').addEventListener('click', async function () {
     var m = document.getElementById('oppGateMsg');
-    if (typeof oppAccount !== 'undefined' && oppAccount) {
-      if (m) m.textContent = 'Loading dashboard...';
-      goLiveOpps().then(function () { hideOppGate(); }).catch(function (e) { if (typeof msal !== 'undefined' && e instanceof msal.InteractionRequiredAuthError) { beginOppSignIn(); } else { if (m) m.textContent = 'Error - please retry.'; } });
-    } else {
-      if (m) m.textContent = 'Redirecting to Microsoft sign-in...';
-      beginOppSignIn();
-    }
+    if (m) m.textContent = 'Signing in...';
+    try {
+      if (!oppMsalInstance) await initOppMsal();
+      if (oppAccount) { await goLiveOpps(); hideOppGate(); return; }
+    } catch (e) { console.warn('sign-in click:', e && e.message); }
+    if (m) m.textContent = 'Redirecting to Microsoft sign-in...';
+    beginOppSignIn();
   });
 }
 function showOppGate(msg) {
