@@ -621,6 +621,8 @@
       <div style="margin-left:auto; display:flex; gap:6px;">
         <button class="btn ghost" style="background:#94A3B8; padding:6px 10px; font-size:12px;" onclick="clearAllSnapshots()" title="Erase all stored weekly snapshots">🗑 Clear History</button>
         <button class="btn" style="padding:6px 12px; font-size:12px;" onclick="exportAllBuckets()">📥 Export All Buckets</button>
+        <button class="btn" style="padding:6px 12px; font-size:12px;" onclick="exportBucketsJson()" title="Download buckets.json manually">📤 buckets.json</button>
+        <button id="autoSaveBtn" class="btn" style="padding:6px 12px; font-size:12px; background:#94A3B8;" onclick="toggleAutoSave()" title="Auto-publish: on each visitor upload, saves previous buckets as baseline and publishes the new file to the repo for everyone">☁ Auto-save: Off</button>
       </div>
     </div>
   </div>
@@ -628,26 +630,44 @@
   <!-- 7 BUCKET CARDS IN ONE ROW -->
   <div id="bucketGrid2" class="bucket-row"></div>
 
-  <div class="card" style="padding:14px 16px; margin:12px 0;">
+  <div id="unitMatrixWrap" class="card">
     <style>
-      #unitMatrixTable{width:100%;border-collapse:collapse;font-size:12px;}
-      #unitMatrixTable th,#unitMatrixTable td{border-bottom:1px solid #eef1f5;padding:6px 8px;text-align:center;white-space:nowrap;}
-      #unitMatrixTable th{position:sticky;top:0;background:#fff;z-index:2;font-size:11px;color:#5a6b7d;}
-      #unitMatrixTable tr.umrow:hover td{background:#f3f8ff !important;}
+      #unitMatrixWrap{padding:14px 16px;margin:12px 0;}
+      #unitMatrixTable{width:100%;border-collapse:separate;border-spacing:0;font-size:12px;table-layout:fixed;}
+      #unitMatrixTable th,#unitMatrixTable td{padding:4px 6px;text-align:center;white-space:nowrap;border-bottom:1px solid #eef1f5;}
+      #unitMatrixTable th{position:sticky;top:0;background:#fff;z-index:2;font-size:11px;font-weight:700;letter-spacing:.4px;padding:8px 6px;}
+      #unitMatrixTable th.um-unit,#unitMatrixTable td.um-unit{text-align:left;position:sticky;left:0;background:inherit;width:230px;font-weight:600;color:#26415c;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;}
+      #unitMatrixTable th.um-unit{background:#fff;color:#5a6b7d;}
+      #unitMatrixTable th.um-change,#unitMatrixTable td.um-change{width:120px;}
+      #unitMatrixTable tbody tr{background:#fff;cursor:pointer;}
+      #unitMatrixTable tbody tr:nth-child(even){background:#fafbfd;}
+      #unitMatrixTable tbody tr.um-moved{background:#FFF7E6;}
+      #unitMatrixTable tbody tr:hover{background:#eef5ff;}
+      #unitMatrixTable .um-chip{display:inline-flex;align-items:center;justify-content:center;width:25px;height:21px;border-radius:6px;color:#fff;font-weight:700;font-size:10px;box-shadow:0 1px 3px rgba(0,0,0,.18);}
+      #unitMatrixTable .um-chip.um-from{background:transparent !important;border:1.5px dashed;opacity:.75;font-weight:600;box-shadow:none;}
+      #unitMatrixTable .um-empty{display:inline-block;width:5px;height:5px;border-radius:50%;background:#e3e8ef;}
+      #unitMatrixTable .um-move{font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:3px;}
+      #unitMatrixTable .um-arrow{color:#E8A33D;font-weight:800;margin:0 1px;}
+      #unitMatrixTable .um-nochange{color:#cad3dd;}
       .drill-tbl{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:6px;}
       .drill-tbl th,.drill-tbl td{border-bottom:1px solid #eef1f5;padding:5px 8px;text-align:left;}
       .drill-tbl th{background:#f4f6f9;color:#5a6b7d;font-size:11px;position:sticky;top:0;}
     </style>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
       <div class="section-title" style="margin:0;">📋 Unit Bucket Movement</div>
-      <input id="unitMatrixSearch" oninput="renderUnitMatrix()" placeholder="Search Building / Unit…" style="padding:6px 10px;border:1px solid #d6deea;border-radius:8px;font-size:12px;min-width:230px;">
-      <label style="font-size:12px;display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="checkbox" id="unitMatrixMoversOnly" onchange="renderUnitMatrix()"> Movers only</label>
+      <input id="unitMatrixSearch" oninput="renderUnitMatrix()" placeholder="Search Building / Unit…" style="padding:7px 11px;border:1px solid #d6deea;border-radius:8px;font-size:12px;min-width:230px;">
+      <label style="font-size:12px;display:flex;align-items:center;gap:5px;cursor:pointer;color:#5a6b7d;"><input type="checkbox" id="unitMatrixMoversOnly" onchange="renderUnitMatrix()"> Movers only</label>
       <span id="unitMatrixMeta" style="margin-left:auto;font-size:12px;color:var(--muted);"></span>
     </div>
-    <div style="overflow:auto;max-height:540px;border:1px solid #eef1f5;border-radius:8px;">
+    <div style="overflow:auto;max-height:560px;border:1px solid #eef1f5;border-radius:10px;">
       <table id="unitMatrixTable"></table>
     </div>
-    <div style="font-size:11px;color:var(--muted);margin-top:6px;">Solid dot = current bucket · hollow dot = previous bucket · highlighted row = moved since the last committed baseline. Click any unit for its full visit &amp; opportunity history. (C Aging is an overlay, so it is excluded from the columns.)</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px;display:flex;gap:16px;flex-wrap:wrap;">
+      <span><span style="display:inline-block;width:13px;height:11px;border-radius:4px;background:#2E8B57;vertical-align:middle;"></span> current bucket</span>
+      <span><span style="display:inline-block;width:13px;height:11px;border-radius:4px;border:1.5px dashed #888;vertical-align:middle;"></span> previous bucket</span>
+      <span style="background:#FFF7E6;padding:1px 6px;border-radius:4px;">highlighted = moved</span>
+      <span>Click a unit for full visit &amp; opportunity history. (C Aging overlay excluded.)</span>
+    </div>
   </div>
 
   <!-- UNIT ANALYSIS (moved from Tab 1) -->
@@ -995,6 +1015,7 @@ function handleLocFile(file) {
       const balqisLocs = filterToBalqis(locs, 'loc');
       LOC_DATA = balqisLocs;
       try{localStorage.setItem('VBD_LOC_DATA',JSON.stringify({name:file.name,recs:balqisLocs}));}catch(e){}
+      try{ if(typeof autoPublishLoc==='function') autoPublishLoc(file); }catch(e){}
       document.getElementById('locLastLoaded').textContent = file.name;
       document.getElementById('locRecordCount').textContent = balqisLocs.length.toLocaleString();
       recomputeAll();
@@ -1063,6 +1084,7 @@ function handleOppFile(file) {
 }
 
 function handleFile(file) {
+  try{ if(typeof autoPublishPre==='function') autoPublishPre(); }catch(e){}
   toast('Reading ' + file.name + '...');
   const reader = new FileReader();
   reader.onload = (e) => {
@@ -1118,6 +1140,7 @@ function handleFile(file) {
       const balqis = filterToBalqis(records, 'vms');
       loadData(balqis, file.name);
       try{localStorage.setItem('VBD_VMS_DATA',JSON.stringify({name:file.name,recs:balqis}));}catch(e){}
+      try{ if(typeof autoPublishVisitor==='function') autoPublishVisitor(file); }catch(e){}
       toast(`Loaded ${records.length} records → ${balqis.length} Balqis-only`, 'ok');
     } catch (err) {
       console.error(err);
@@ -2474,26 +2497,115 @@ function loadCentralSnapshots() {
       try { if (typeof renderUnitMatrix === 'function') renderUnitMatrix(); } catch (e) {}
     }).catch(function () {});
 }
-function exportBucketsJson() {
+function buildBucketsJsonStr() {
   var all = (typeof loadSnapshots === 'function') ? loadSnapshots() : {};
   var units = {};
   if (typeof SEG_META !== 'undefined') { for (var _u in SEG_META) { units[_u] = SEG_META[_u].bucket; } }
   all._units = units;
-  all._unitsDate = (typeof fmtDate === 'function') ? fmtDate(new Date()) : new Date().toISOString().slice(0,10);
-  var blob = new Blob([JSON.stringify(all, null, 2)], { type: 'application/json' });
+  all._unitsDate = (typeof fmtDate === 'function') ? fmtDate(new Date()) : new Date().toISOString().slice(0, 10);
+  return JSON.stringify(all, null, 2);
+}
+function exportBucketsJson() {
+  var blob = new Blob([buildBucketsJsonStr()], { type: 'application/json' });
   var url = URL.createObjectURL(blob);
   var a = document.createElement('a');
   a.href = url; a.download = 'buckets.json'; a.click();
   URL.revokeObjectURL(url);
-  if (typeof toast === 'function') toast('Downloaded buckets.json - commit it to the repo to share history with everyone', 'ok');
+  if (typeof toast === 'function') toast('Downloaded buckets.json - commit it to the repo to share', 'ok');
+}
+
+/* ===== Auto-commit baseline to the repo via GitHub API (token kept in this browser only) ===== */
+function setAutoSaveBtn(state) {
+  var b = document.getElementById('autoSaveBtn');
+  if (!b) return;
+  b.textContent = state === 'on' ? '☁ Auto-save: On' : '☁ Auto-save: Off';
+  b.style.background = state === 'on' ? '#2E8B57' : '#94A3B8';
+}
+async function ghPutFile(token, path, b64content, message) {
+  var owner = location.hostname.split('.')[0];
+  var parts = location.pathname.split('/').filter(Boolean);
+  var repo = parts.length ? parts[0] : '';
+  if (!owner || !repo) throw new Error('Cannot determine repo from URL (host the page first)');
+  var api = 'https://api.github.com/repos/' + owner + '/' + repo + '/contents/' + path;
+  var headers = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json' };
+  var sha = null;
+  try { var g = await fetch(api, { headers: headers }); if (g.ok) { var gj = await g.json(); sha = gj.sha; } } catch (e) {}
+  var body = { message: message || ('Update ' + path), content: b64content };
+  if (sha) body.sha = sha;
+  var r = await fetch(api, { method: 'PUT', headers: headers, body: JSON.stringify(body) });
+  if (!r.ok) { var t = ''; try { t = await r.text(); } catch (e) {} throw new Error('GitHub ' + r.status + ' ' + t.slice(0, 150)); }
+  return true;
+}
+async function ghPutBucketsJson(token, jsonStr, message) {
+  return ghPutFile(token, 'buckets.json', btoa(unescape(encodeURIComponent(jsonStr))), message);
+}
+function ghToken() { return localStorage.getItem('vbd_gh_token'); }
+function ghAuto() { return localStorage.getItem('vbd_autosave') === '1'; }
+// On upload: freeze the CURRENT (pre-upload) buckets as the shared baseline, in memory + repo
+function autoPublishPre() {
+  if (!ghAuto() || !ghToken()) return;
+  if (typeof SEG_META === 'undefined' || !Object.keys(SEG_META).length) return;
+  var units = {}; for (var u in SEG_META) units[u] = SEG_META[u].bucket;
+  OPP_BASELINE_UNITS = units;
+  ghPutBucketsJson(ghToken(), buildBucketsJsonStr(), 'Baseline before new upload ' + new Date().toISOString())
+    .then(function () { if (typeof toast === 'function') toast('Previous buckets saved as baseline', 'ok'); })
+    .catch(function (e) { console.warn('baseline publish failed', e.message); });
+}
+// Publish an uploaded data file to the repo so all colleagues get it on refresh
+function autoPublishDataFile(file, path) {
+  if (!ghAuto() || !ghToken() || !file) return;
+  var reader = new FileReader();
+  reader.onload = function () {
+    var b64 = (String(reader.result).split(',')[1]) || '';
+    ghPutFile(ghToken(), path, b64, 'Publish ' + path + ' ' + new Date().toISOString())
+      .then(function () { if (typeof toast === 'function') toast(path + ' published — colleagues see it on refresh', 'ok'); })
+      .catch(function (e) { if (typeof toast === 'function') toast('Publish failed: ' + (e.message || e), 'error'); });
+  };
+  reader.readAsDataURL(file);
+}
+function autoPublishVisitor(file) { autoPublishDataFile(file, 'visitor.xlsx'); }
+function autoPublishLoc(file) { autoPublishDataFile(file, 'locations.xlsx'); }
+async function autoSaveBaselineIfDue(force) {
+  var token = localStorage.getItem('vbd_gh_token');
+  var on = localStorage.getItem('vbd_autosave') === '1';
+  if (!token || (!on && !force)) return;
+  if (typeof SEG_META === 'undefined' || !Object.keys(SEG_META).length) return;
+  var today = (typeof fmtDate === 'function') ? fmtDate(new Date()) : new Date().toISOString().slice(0, 10);
+  if (!force && localStorage.getItem('vbd_baseline_date') === today) return;
+  try {
+    await ghPutBucketsJson(token, buildBucketsJsonStr(), 'Auto baseline ' + today);
+    localStorage.setItem('vbd_baseline_date', today);
+    setAutoSaveBtn('on');
+    if (typeof toast === 'function') toast('Baseline auto-saved to repo (' + today + ')', 'ok');
+  } catch (e) {
+    console.warn('Auto-save failed:', e.message);
+    if (typeof toast === 'function') toast('Auto-save failed: ' + (e.message || e), 'error');
+  }
+}
+function toggleAutoSave() {
+  var on = localStorage.getItem('vbd_autosave') === '1';
+  if (on) {
+    localStorage.setItem('vbd_autosave', '0');
+    setAutoSaveBtn('off');
+    if (typeof toast === 'function') toast('Auto-publish turned off', 'ok');
+    return;
+  }
+  var token = localStorage.getItem('vbd_gh_token');
+  if (!token) {
+    token = prompt('Paste a GitHub fine-grained token (Contents: Read & write for this repo).\nStored only in THIS browser, never in the repo.');
+    if (!token) return;
+    localStorage.setItem('vbd_gh_token', token.trim());
+  }
+  localStorage.setItem('vbd_autosave', '1');
+  setAutoSaveBtn('on');
+  if (typeof toast === 'function') toast('Auto-publish ON. Next visitor upload publishes to everyone and saves the previous buckets as baseline.', 'ok');
 }
 
 function renderUnitMatrix() {
   var tbl = document.getElementById('unitMatrixTable');
   if (!tbl || typeof SEG_META === 'undefined') return;
   var COLS = ['A+','A','B','D','E','F'];
-  var colDef = {};
-  if (typeof SEG_DEFS !== 'undefined') SEG_DEFS.forEach(function (d) { colDef[d.k] = d; });
+  var colDef = {}; if (typeof SEG_DEFS !== 'undefined') SEG_DEFS.forEach(function (d) { colDef[d.k] = d; });
   var units = Object.keys(SEG_META).sort(function (a, b) {
     return (SEG_META[a].building || '').localeCompare(SEG_META[b].building || '') || a.localeCompare(b);
   });
@@ -2502,9 +2614,9 @@ function renderUnitMatrix() {
   var mEl = document.getElementById('unitMatrixMoversOnly');
   var moversOnly = mEl && mEl.checked;
   var moved = 0, shown = 0;
-  var head = '<thead><tr><th style="text-align:left;position:sticky;left:0;background:#fff;z-index:3;">Building / Unit</th>' +
-    COLS.map(function (k) { var d = colDef[k] || {}; return '<th style="color:' + (d.color || '#555') + '">' + k + '</th>'; }).join('') +
-    '<th>Change</th></tr></thead>';
+  var head = '<thead><tr><th class="um-unit">Building / Unit</th>' +
+    COLS.map(function (k) { var d = colDef[k] || {}; return '<th style="color:' + (d.color || '#555') + ';border-bottom:2px solid ' + (d.color || '#ccc') + '">' + k + '</th>'; }).join('') +
+    '<th class="um-change">Movement</th></tr></thead>';
   var body = '';
   units.forEach(function (u) {
     var cur = SEG_META[u].bucket;
@@ -2516,21 +2628,19 @@ function renderUnitMatrix() {
     shown++;
     var cells = COLS.map(function (k) {
       var d = colDef[k] || {};
-      if (k === cur) return '<td><span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:' + (d.color || '#555') + '"></span></td>';
-      if (isMoved && k === base) return '<td><span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid ' + (d.color || '#999') + ';opacity:.55"></span></td>';
-      return '<td></td>';
+      if (k === cur) return '<td><span class="um-chip" style="background:' + (d.color || '#555') + '">' + k + '</span></td>';
+      if (isMoved && k === base) return '<td><span class="um-chip um-from" style="color:' + (d.color || '#999') + ';border-color:' + (d.color || '#999') + '">' + k + '</span></td>';
+      return '<td><span class="um-empty"></span></td>';
     }).join('');
     var change = isMoved
-      ? '<span style="font-weight:700;color:' + ((colDef[cur] || {}).color || '#333') + '">' + base + ' &rarr; ' + cur + '</span>'
-      : '<span style="color:#9aa7b5;">&mdash;</span>';
-    var rowbg = isMoved ? '#FFF7E6' : '#fff';
-    body += '<tr class="umrow" style="cursor:pointer;background:' + (isMoved ? '#FFF7E6' : 'transparent') + ';" data-u="' + escHtml(u) + '" onclick="openUnitDrill(this.getAttribute(\'data-u\'))">' +
-      '<td style="text-align:left;position:sticky;left:0;background:' + rowbg + ';font-size:12px;font-weight:600;">' + escHtml(u) + '</td>' +
-      cells + '<td style="font-size:12px;">' + change + '</td></tr>';
+      ? '<span class="um-move"><b style="color:' + ((colDef[base] || {}).color || '#777') + '">' + base + '</b><span class="um-arrow">&rarr;</span><b style="color:' + ((colDef[cur] || {}).color || '#333') + '">' + cur + '</b></span>'
+      : '<span class="um-nochange">&mdash;</span>';
+    body += '<tr class="umrow' + (isMoved ? ' um-moved' : '') + '" data-u="' + escHtml(u) + '" onclick="openUnitDrill(this.getAttribute(\'data-u\'))">' +
+      '<td class="um-unit">' + escHtml(u) + '</td>' + cells + '<td class="um-change">' + change + '</td></tr>';
   });
   tbl.innerHTML = head + '<tbody>' + body + '</tbody>';
   var meta = document.getElementById('unitMatrixMeta');
-  if (meta) meta.textContent = shown.toLocaleString() + ' shown · ' + moved.toLocaleString() + ' moved · ' + units.length.toLocaleString() + ' total';
+  if (meta) meta.innerHTML = '<b>' + shown.toLocaleString() + '</b> shown &middot; <b style="color:#E8A33D">' + moved.toLocaleString() + '</b> moved &middot; ' + units.length.toLocaleString() + ' total';
 }
 
 function openUnitDrill(u) {
@@ -2676,6 +2786,7 @@ async function connectLiveOpps() {
 
 window.addEventListener('load', function () {
   ensureOppGate();
+  try { if (typeof setAutoSaveBtn === 'function') setAutoSaveBtn(localStorage.getItem('vbd_autosave') === '1' ? 'on' : 'off'); } catch (e) {}
   if (window.location.protocol === 'file:') {
     showOppGate('Open this dashboard from its hosted https link to sign in.');
     setLiveOppStatus('host me', '#C0392B');
