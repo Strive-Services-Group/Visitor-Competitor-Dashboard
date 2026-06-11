@@ -612,7 +612,7 @@
 
   <div class="section-title">In-Unit Bucket Analysis — Balqis Residence</div>
 
-  <div class="card" style="padding:12px 16px; margin-bottom:12px;">
+  <div class="card" style="padding:5px 12px; margin-bottom:6px;">
     <div style="display:flex; gap:14px; flex-wrap:wrap; align-items:center; font-size:12px; color:var(--muted);">
       <div style="display:none"><strong style="color:var(--slate)">📍 Universe:</strong> <span id="bktUniverse2">—</span> Balqis units</div>
       <div style="display:none"><strong style="color:var(--slate)">⏰ Aging cutoff:</strong> <span id="bktCutoff2">—</span></div>
@@ -2448,7 +2448,7 @@ const OPP_BALQIS_BUILDING_IDS = [
 const OPP_REFRESH_MS = 5 * 60 * 1000;
 const OPP_INFLIGHT_KEY = 'opp_login_inflight';
 
-let oppMsalInstance = null, oppAccount = null, oppCrmToken = null, oppRefreshTimer = null;
+let oppMsalInstance = null, oppAccount = null, oppCrmToken = null, oppRefreshTimer = null, oppReturnedFromRedirect = false;
 
 function setLiveOppStatus(txt, color) {
   const el = document.getElementById('liveOppStatus');
@@ -2466,6 +2466,7 @@ async function initOppMsal() {
   const response = await oppMsalInstance.handleRedirectPromise();
   if (response && response.account) {
     oppAccount = response.account;
+    oppReturnedFromRedirect = true;
     sessionStorage.removeItem(OPP_INFLIGHT_KEY);
   } else {
     const accts = oppMsalInstance.getAllAccounts();
@@ -2833,8 +2834,14 @@ function ensureOppGate() {
     '<div class="ogfoot">Palm Jumeirah, Dubai &middot; Strive Services Group<div class="ogtag">FOR EXCELLENCE WE STRIVE</div></div>';
   document.body.appendChild(g);
   g.querySelector('#oppGateBtn').addEventListener('click', function () {
-    var m = document.getElementById('oppGateMsg'); if (m) m.textContent = 'Redirecting to Microsoft sign-in...';
-    beginOppSignIn();
+    var m = document.getElementById('oppGateMsg');
+    if (typeof oppAccount !== 'undefined' && oppAccount) {
+      if (m) m.textContent = 'Loading dashboard...';
+      goLiveOpps().then(function () { hideOppGate(); }).catch(function (e) { if (typeof msal !== 'undefined' && e instanceof msal.InteractionRequiredAuthError) { beginOppSignIn(); } else { if (m) m.textContent = 'Error - please retry.'; } });
+    } else {
+      if (m) m.textContent = 'Redirecting to Microsoft sign-in...';
+      beginOppSignIn();
+    }
   });
 }
 function showOppGate(msg) {
@@ -2890,10 +2897,10 @@ window.addEventListener('load', function () {
     return;
   }
   initOppMsal().then(async function () {
-    if (oppAccount) {
+    if (oppReturnedFromRedirect) {
       try { await goLiveOpps(); }
       catch (e) {
-        if (e instanceof msal.InteractionRequiredAuthError) { showOppGate('Your session expired - click Sign in to continue.'); }
+        if (e instanceof msal.InteractionRequiredAuthError) { beginOppSignIn(); }
         else { console.warn('Live load failed:', e.message); showOppGate('Could not load data - click Sign in to retry.'); }
       }
     } else {
@@ -2908,6 +2915,8 @@ window.addEventListener('load', function () {
   button[onclick="clearAllSnapshots()"], button[onclick="exportBucketsJson()"], #autoSaveBtn { display:none !important; }
   .bk-wk-meta { display:none !important; }
   #bucketGrid2 .bk-row + .bk-row { border-top:1px solid #eef2f7; padding-top:6px; margin-top:5px; }
+  #tab2 .section-title { margin-top:6px; margin-bottom:8px; }
+  #unitMatrixTable td.um-unit { font-size:12px !important; font-weight:700 !important; }
   #unitMatrixTable th, #unitMatrixTable td { border-right:1px solid #eef2f7; }
   #unitMatrixTable th:last-child, #unitMatrixTable td:last-child { border-right:none; }
 </style>
