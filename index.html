@@ -1018,7 +1018,7 @@ function handleLocFile(file) {
       const balqisLocs = filterToBalqis(locs, 'loc');
       LOC_DATA = balqisLocs;
       try{localStorage.setItem('VBD_LOC_DATA',JSON.stringify({name:file.name,recs:balqisLocs}));}catch(e){}
-      try{ if(typeof autoPublishLoc==='function') autoPublishLoc(file); }catch(e){}
+      try{ if(file && !file._central && typeof autoPublishLoc==='function') autoPublishLoc(file); }catch(e){}
       document.getElementById('locLastLoaded').textContent = file.name;
       document.getElementById('locRecordCount').textContent = balqisLocs.length.toLocaleString();
       recomputeAll();
@@ -1087,7 +1087,7 @@ function handleOppFile(file) {
 }
 
 function handleFile(file) {
-  try{ if(typeof autoPublishPre==='function') autoPublishPre(); }catch(e){}
+  try{ if(file && !file._central && typeof autoPublishPre==='function') autoPublishPre(); }catch(e){}
   toast('Reading ' + file.name + '...');
   const reader = new FileReader();
   reader.onload = (e) => {
@@ -1143,7 +1143,7 @@ function handleFile(file) {
       const balqis = filterToBalqis(records, 'vms');
       loadData(balqis, file.name);
       try{localStorage.setItem('VBD_VMS_DATA',JSON.stringify({name:file.name,recs:balqis}));}catch(e){}
-      try{ if(typeof autoPublishVisitor==='function') autoPublishVisitor(file); }catch(e){}
+      try{ if(file && !file._central && typeof autoPublishVisitor==='function') autoPublishVisitor(file); }catch(e){}
       toast(`Loaded ${records.length} records → ${balqis.length} Balqis-only`, 'ok');
     } catch (err) {
       console.error(err);
@@ -2476,10 +2476,10 @@ function loadCentralData() {
   // file update shows the latest data to everyone. Cache-busted to always get latest.
   var bust = '?t=' + Date.now();
   fetch('locations.xlsx' + bust).then(function (r) { if (!r.ok) throw 0; return r.blob(); })
-    .then(function (b) { try { handleLocFile(new File([b], 'locations.xlsx')); } catch (e) {} })
+    .then(function (b) { try { var _f=new File([b],'locations.xlsx'); _f._central=true; handleLocFile(_f); } catch (e) {} })
     .catch(function () {});
   fetch('visitor.xlsx' + bust).then(function (r) { if (!r.ok) throw 0; return r.blob(); })
-    .then(function (b) { try { handleFile(new File([b], 'visitor.xlsx')); } catch (e) {} })
+    .then(function (b) { try { var _f=new File([b],'visitor.xlsx'); _f._central=true; handleFile(_f); } catch (e) {} })
     .catch(function () {});
 }
 
@@ -2492,7 +2492,7 @@ function loadCentralSnapshots() {
   fetch('buckets.json?t=' + Date.now()).then(function (r) { if (!r.ok) throw 0; return r.json(); })
     .then(function (j) {
       j = j || {};
-      OPP_BASELINE_UNITS = j._units || {};
+      OPP_BASELINE_UNITS = (j._units && Object.keys(j._units).length) ? j._units : (function(){ try { return JSON.parse(localStorage.getItem('VBD_BASELINE')||'null') || {}; } catch(e){ return {}; } })();
       var snaps = {};
       for (var k in j) { if (k.charAt(0) !== '_') snaps[k] = j[k]; }
       OPP_CENTRAL_SNAPS = snaps;
@@ -2546,13 +2546,15 @@ function ghToken() { return localStorage.getItem('vbd_gh_token'); }
 function ghAuto() { return localStorage.getItem('vbd_autosave') === '1'; }
 // On upload: freeze the CURRENT (pre-upload) buckets as the shared baseline, in memory + repo
 function autoPublishPre() {
-  if (!ghAuto() || !ghToken()) return;
   if (typeof SEG_META === 'undefined' || !Object.keys(SEG_META).length) return;
   var units = {}; for (var u in SEG_META) units[u] = SEG_META[u].bucket;
   OPP_BASELINE_UNITS = units;
-  ghPutBucketsJson(ghToken(), buildBucketsJsonStr(), 'Baseline before new upload ' + new Date().toISOString())
-    .then(function () { if (typeof toast === 'function') toast('Previous buckets saved as baseline', 'ok'); })
-    .catch(function (e) { console.warn('baseline publish failed', e.message); });
+  try { localStorage.setItem('VBD_BASELINE', JSON.stringify(units)); } catch (e) {}
+  if (ghAuto() && ghToken()) {
+    ghPutBucketsJson(ghToken(), buildBucketsJsonStr(), 'Baseline before new upload ' + new Date().toISOString())
+      .then(function () { if (typeof toast === 'function') toast('Previous buckets saved as baseline', 'ok'); })
+      .catch(function (e) { console.warn('baseline publish failed', e.message); });
+  }
 }
 // Publish an uploaded data file to the repo so all colleagues get it on refresh
 function autoPublishDataFile(file, path) {
