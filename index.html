@@ -497,7 +497,7 @@
     <div class="brand">
       <div class="brand-logo">S&amp;C</div>
       <div>
-        <h1>Visitor &amp; Competitor Intelligence Dashboard</h1>
+        <h1>Resident 360 / Visitor Dashboard</h1>
         <p>S &amp; C Building Maintenance L.L.C — Competitive Footprint Analysis</p>
       </div>
     </div>
@@ -532,8 +532,8 @@
 
 <!-- TAB NAVIGATION -->
 <div class="tab-bar">
-  <button class="tab-btn active" data-tab="tab1" onclick="switchTab('tab1')">📊 Visitor &amp; Competitor Analysis</button>
-  <button class="tab-btn" data-tab="tab2" onclick="switchTab('tab2')">🎯 In-Unit Bucket Analysis</button>
+  <button class="tab-btn active" data-tab="tab2" onclick="switchTab('tab2')">🏠 Residence 360</button>
+  <button class="tab-btn" data-tab="tab1" onclick="switchTab('tab1')">📊 Visitor &amp; Competitor Analysis</button>
   <div style="margin-left:auto; display:flex; align-items:center; gap:10px; font-size:12px; color:var(--muted);">
     <span>📍 Project: <select id="projectFilter" onchange="applyProject(this.value)" style="font-weight:700;color:var(--deep-ocean);border:1px solid #cfe0ee;border-radius:7px;padding:3px 8px;font-size:13px;background:#fff;cursor:pointer;"><option value="BALQIS RESIDENCE" selected>BALQIS RESIDENCE</option></select></span>
   </div>
@@ -814,6 +814,7 @@ window.addEventListener('DOMContentLoaded', () => {
   try { ALL_VMS = (function(){ var s=null; try{s=JSON.parse(localStorage.getItem('VBD_VMS_DATA')||'null');}catch(e){} return (s&&s.recs)?s.recs:(EMBEDDED_DATA||[]); })(); } catch(e){}
     loadCentralData();
   loadCentralSnapshots();
+  try { switchTab('tab2'); } catch(e){}
 });
 
 /* ============================================================
@@ -2579,6 +2580,7 @@ function loadCentralSnapshots() {
     .then(function (j) {
       j = j || {};
       OPP_BASELINE_UNITS = (j._units && Object.keys(j._units).length) ? j._units : (function(){ try { return JSON.parse(localStorage.getItem('VBD_BASELINE')||'null') || {}; } catch(e){ return {}; } })();
+      try { if (j._unitsWeek) localStorage.setItem('VBD_BASELINE_WK', j._unitsWeek); } catch(e){}
       var snaps = {};
       for (var k in j) { if (k.charAt(0) !== '_') snaps[k] = j[k]; }
       OPP_CENTRAL_SNAPS = snaps;
@@ -2592,6 +2594,7 @@ function buildBucketsJsonStr() {
   if (typeof SEG_META !== 'undefined') { for (var _u in SEG_META) { units[_u] = SEG_META[_u].bucket; } }
   all._units = units;
   all._unitsDate = (typeof fmtDate === 'function') ? fmtDate(new Date()) : new Date().toISOString().slice(0, 10);
+  all._unitsWeek = (typeof getISOWeek === 'function') ? getISOWeek(new Date()) : '';
   return JSON.stringify(all, null, 2);
 }
 function exportBucketsJson() {
@@ -2633,12 +2636,15 @@ function ghAuto() { return localStorage.getItem('vbd_autosave') === '1'; }
 // On upload: freeze the CURRENT (pre-upload) buckets as the shared baseline, in memory + repo
 function autoPublishPre() {
   if (typeof SEG_META === 'undefined' || !Object.keys(SEG_META).length) return;
+  var curWeek = (typeof getISOWeek === 'function') ? getISOWeek(new Date()) : '';
+  var storedWeek = localStorage.getItem('VBD_BASELINE_WK');
+  if (storedWeek && storedWeek === curWeek) return;   // keep this week's baseline so movement persists all week
   var units = {}; for (var u in SEG_META) units[u] = SEG_META[u].bucket;
   OPP_BASELINE_UNITS = units;
-  try { localStorage.setItem('VBD_BASELINE', JSON.stringify(units)); } catch (e) {}
+  try { localStorage.setItem('VBD_BASELINE', JSON.stringify(units)); localStorage.setItem('VBD_BASELINE_WK', curWeek); } catch (e) {}
   if (ghAuto() && ghToken()) {
-    ghPutBucketsJson(ghToken(), buildBucketsJsonStr(), 'Baseline before new upload ' + new Date().toISOString())
-      .then(function () { if (typeof toast === 'function') toast('Previous buckets saved as baseline', 'ok'); })
+    ghPutBucketsJson(ghToken(), buildBucketsJsonStr(), 'Week baseline ' + curWeek)
+      .then(function () { if (typeof toast === 'function') toast('Week baseline saved \u2014 movement persists all week', 'ok'); })
       .catch(function (e) { console.warn('baseline publish failed', e.message); });
   }
 }
@@ -2901,6 +2907,7 @@ window.addEventListener('load', function () {
 <style id="uiTrim">
   button[onclick="clearAllSnapshots()"], button[onclick="exportBucketsJson()"], #autoSaveBtn { display:none !important; }
   .bk-wk-meta { display:none !important; }
+  #bucketGrid2 .bk-row + .bk-row { border-top:1px solid #eef2f7; padding-top:6px; margin-top:5px; }
   #unitMatrixTable th, #unitMatrixTable td { border-right:1px solid #eef2f7; }
   #unitMatrixTable th:last-child, #unitMatrixTable td:last-child { border-right:none; }
 </style>
