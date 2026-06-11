@@ -535,7 +535,7 @@
   <button class="tab-btn active" data-tab="tab1" onclick="switchTab('tab1')">📊 Visitor &amp; Competitor Analysis</button>
   <button class="tab-btn" data-tab="tab2" onclick="switchTab('tab2')">🎯 In-Unit Bucket Analysis</button>
   <div style="margin-left:auto; display:flex; align-items:center; gap:10px; font-size:12px; color:var(--muted);">
-    <span>📍 Scope: <strong style="color:var(--deep-ocean)">Balqis Residence</strong></span>
+    <span>📍 Project: <select id="projectFilter" onchange="applyProject(this.value)" style="font-weight:700;color:var(--deep-ocean);border:1px solid #cfe0ee;border-radius:7px;padding:3px 8px;font-size:13px;background:#fff;cursor:pointer;"><option value="BALQIS RESIDENCE" selected>BALQIS RESIDENCE</option></select></span>
   </div>
 </div>
 
@@ -746,6 +746,11 @@ const PAL = {
 };
 const MY_COMPANY = 'S & C BUILDING MAINTENANCE L.L.C';
 const BALQIS_BUILDINGS = new Set(['BALQIS BLOCK A','BALQIS BLOCK B','BALQIS BLOCK C','BALQIS VILLAS']);
+let SELECTED_PROJECT = 'BALQIS RESIDENCE';
+let CURRENT_BUILDINGS = new Set(['BALQIS BLOCK A','BALQIS BLOCK B','BALQIS BLOCK C','BALQIS VILLAS']);
+let ALL_LOC = [];
+let ALL_VMS = [];
+let PROJECT_BUILDINGS = {};
 const SNAPSHOT_PREFIX = 'vbd_bucket_snapshot_';   // localStorage key prefix
 const ACTIVE_PROJECT = 'BALQIS';                    // future: make user-selectable
 const PURPOSE_BUCKETS = [
@@ -805,29 +810,100 @@ window.addEventListener('DOMContentLoaded', () => {
     if (_sv && _sv.recs) { loadData(filterToBalqis(_sv.recs,'vms'), _sv.name||'Saved'); }
     else { loadData(filterToBalqis(EMBEDDED_DATA, 'vms'), 'Embedded snapshot'); }
   } catch(e){ loadData(filterToBalqis(EMBEDDED_DATA, 'vms'), 'Embedded snapshot'); }
-  loadCentralData();
+  try { ALL_LOC = (function(){ var s=null; try{s=JSON.parse(localStorage.getItem('VBD_LOC_DATA')||'null');}catch(e){} return (s&&s.recs)?s.recs:(EMBEDDED_LOCATIONS||[]); })(); buildProjectMap(); } catch(e){}
+  try { ALL_VMS = (function(){ var s=null; try{s=JSON.parse(localStorage.getItem('VBD_VMS_DATA')||'null');}catch(e){} return (s&&s.recs)?s.recs:(EMBEDDED_DATA||[]); })(); } catch(e){}
+    loadCentralData();
   loadCentralSnapshots();
 });
 
 /* ============================================================
    BALQIS PROJECT FILTER — applied to every dataset
 ============================================================ */
+function isExcludedUnit(up) {
+  if (!up) return false;
+  if (up.indexOf('BALQIS BLOCK C_') !== 0) return false;   // Block C lower floors belong to another group
+  var tok = up.split('-').pop();
+  if (/^G/.test(tok)) return true;                          // ground floor (G01..G12)
+  var n = parseInt(tok, 10);
+  if (!isNaN(n) && n >= 100 && n <= 599) return true;       // floors 1-5 (101..518)
+  return false;
+}
 function isBalqisUnit(u) {
   if (!u) return false;
   const up = u.toUpperCase();
-  return up.startsWith('BALQIS BLOCK A_') || up.startsWith('BALQIS BLOCK B_') ||
-         up.startsWith('BALQIS BLOCK C_') || up.startsWith('BALQIS VILLAS_');
+  if (isExcludedUnit(up)) return false;
+  for (const b of CURRENT_BUILDINGS) { if (up.startsWith(b + '_')) return true; }
+  return false;
 }
-function isBalqisBuilding(b) { return b && BALQIS_BUILDINGS.has((b||'').toUpperCase()); }
+function isBalqisBuilding(b) { return b && CURRENT_BUILDINGS.has((b||'').toUpperCase()); }
 function filterToBalqis(data, kind) {
-  if (kind === 'loc') return (data||[]).filter(r => isBalqisBuilding(r.b) || isBalqisUnit(r.u));
+  if (kind === 'loc') return (data||[]).filter(r => (isBalqisBuilding(r.b) || isBalqisUnit(r.u)) && !isExcludedUnit(String(r.u||'').toUpperCase()));
   if (kind === 'opp') {
     const out = {};
-    for (const u in data) if (isBalqisUnit(u)) out[u] = data[u];
+    for (const u in data) if (isBalqisUnit(u) && !isExcludedUnit(String(u).toUpperCase())) out[u] = data[u];
     return out;
   }
-  if (kind === 'vms') return (data||[]).filter(r => isBalqisBuilding(r.building) || isBalqisUnit(r.unit));
+  if (kind === 'vms') return (data||[]).filter(r => (isBalqisBuilding(r.building) || isBalqisUnit(r.unit)) && !isExcludedUnit(String(r.unit||'').toUpperCase()));
   return data;
+}
+function buildProjectMap() {
+  PROJECT_BUILDINGS = {};
+  (ALL_LOC || []).forEach(function (r) {
+    var p = (r.p || '').trim().toUpperCase(), b = (r.b || '').trim().toUpperCase();
+    if (!p || !b) return;
+    if (!PROJECT_BUILDINGS[p]) PROJECT_BUILDINGS[p] = new Set();
+    PROJECT_BUILDINGS[p].add(b);
+  });
+  var sel = document.getElementById('projectFilter');
+  if (sel) {
+    var names = Object.keys(PROJECT_BUILDINGS).sort();
+    if (!PROJECT_BUILDINGS['BALQIS RESIDENCE']) names.unshift('BALQIS RESIDENCE');
+    sel.innerHTML = names.map(function (p) { return '<option value="' + p.replace(/"/g,'&quot;') + '"' + (p === SELECTED_PROJECT ? ' selected' : '') + '>' + p + '</option>'; }).join('');
+  }
+}
+async function applyProject(p) {
+  if (!p) return;
+  SELECTED_PROJECT = String(p).toUpperCase();
+  CURRENT_BUILDINGS = PROJECT_BUILDINGS[SELECTED_PROJECT] || new Set();
+  loadData(filterToBalqis(ALL_VMS || [], 'vms'), SELECTED_PROJECT);
+  LOC_DATA = filterToBalqis(ALL_LOC || [], 'loc');
+  var lc = document.getElementById('locRecordCount'); if (lc) lc.textContent = LOC_DATA.length.toLocaleString();
+  if (SELECTED_PROJECT === 'BALQIS RESIDENCE') {
+    if (typeof loadLiveOpportunities === 'function' && typeof oppAccount !== 'undefined' && oppAccount) { loadLiveOpportunities().catch(function(){ recomputeAll(); }); }
+    else { recomputeAll(); }
+  } else {
+    OPP_DATA = {}; recomputeAll();
+    if (typeof oppAccount !== 'undefined' && oppAccount) fetchProjectOpps(SELECTED_PROJECT);
+  }
+}
+async function fetchProjectOpps(project) {
+  try {
+    if (typeof oppCrmGet !== 'function') return;
+    var base = OPP_CRM_API_BASE, F = '@OData.Community.Display.V1.FormattedValue';
+    var pj = await oppCrmGet(base + "/msdyn_functionallocations?$select=msdyn_functionallocationid&$filter=" + encodeURIComponent("msdyn_name eq '" + project.replace(/'/g, "''") + "'") + "&$top=1");
+    var pid = (pj.value && pj.value[0]) ? pj.value[0].msdyn_functionallocationid : null;
+    if (!pid) { OPP_DATA = {}; recomputeAll(); if (typeof toast === 'function') toast('No opportunities found for ' + project, 'warn'); return; }
+    var sel = "$select=ssg_textdepartment,createdon,ssg_homeservicegates,_ssg_building_value,_ssg_unit_value";
+    var u2 = base + "/opportunities?" + sel + "&$filter=" + encodeURIComponent("_ssg_communityproject_value eq " + pid);
+    var recs = [], guard = 0;
+    while (u2 && guard < 25) { var j = await oppCrmGet(u2); recs = recs.concat(j.value || []); u2 = j['@odata.nextLink'] || null; guard++; }
+    var per = {}; OPP_RAW_BY_UNIT = {};
+    for (var i = 0; i < recs.length; i++) {
+      var o = recs[i], b = o['_ssg_building_value' + F] || '', un = o['_ssg_unit_value' + F] || '';
+      if (!b && !un) continue;
+      var key = b + '_' + un, gate = (o['ssg_homeservicegates' + F] || '').trim(), dept = (o.ssg_textdepartment || '').trim();
+      var ds = ''; if (o.createdon) { var d = new Date(new Date(o.createdon).getTime() + 4 * 3600 * 1000); ds = d.toISOString().slice(0, 10); }
+      if (!per[key]) per[key] = { w: 0, n: 0, t: 0, lw: '', ew: '', wd: [], nd: [], _wd: new Set(), _nd: new Set() };
+      var e = per[key]; e.t++;
+      (OPP_RAW_BY_UNIT[key] = OPP_RAW_BY_UNIT[key] || []).push({ date: ds, dept: dept, gate: gate, won: gate === OPP_WON_GATE });
+      if (gate === OPP_WON_GATE) { e.w++; if (ds) { if (!e.lw || ds > e.lw) e.lw = ds; if (!e.ew || ds < e.ew) e.ew = ds; } if (dept) e._wd.add(dept); }
+      else { e.n++; if (dept) e._nd.add(dept); }
+    }
+    for (var k in per) { per[k].wd = [...per[k]._wd]; per[k].nd = [...per[k]._nd]; delete per[k]._wd; delete per[k]._nd; }
+    OPP_DATA = filterToBalqis(per, 'opp');
+    recomputeAll();
+    if (typeof toast === 'function') toast(project + ': ' + Object.keys(OPP_DATA).length + ' opp-units (visits show 0 - no VMS data)', 'ok');
+  } catch (e) { console.warn('project opps failed', e.message); }
 }
 
 /* ============================================================
@@ -1015,6 +1091,7 @@ function handleLocFile(file) {
         seen.add(u);
         locs.push({ u, b: String(row[idx.bld]||'').trim(), p: String(row[idx.proj]||'').trim(), f: String(row[idx.flr]||'').trim() });
       }
+      ALL_LOC = locs; buildProjectMap();
       const balqisLocs = filterToBalqis(locs, 'loc');
       LOC_DATA = balqisLocs;
       try{localStorage.setItem('VBD_LOC_DATA',JSON.stringify({name:file.name,recs:balqisLocs}));}catch(e){}
@@ -1140,6 +1217,7 @@ function handleFile(file) {
         });
       }
       if (records.length === 0) { toast('No records parsed', 'error'); return; }
+      ALL_VMS = records;
       const balqis = filterToBalqis(records, 'vms');
       loadData(balqis, file.name);
       try{localStorage.setItem('VBD_VMS_DATA',JSON.stringify({name:file.name,recs:balqis}));}catch(e){}
@@ -1156,6 +1234,7 @@ function handleFile(file) {
 function resetToEmbedded() {
   if (!confirm('Reset to the built-in sample snapshot? This discards your uploaded VMS & Locations data.')) return;
   try{localStorage.removeItem('VBD_VMS_DATA');localStorage.removeItem('VBD_LOC_DATA');}catch(e){}
+  try{ ALL_LOC = EMBEDDED_LOCATIONS||[]; ALL_VMS = EMBEDDED_DATA||[]; buildProjectMap(); }catch(e){}
   LOC_DATA = filterToBalqis(EMBEDDED_LOCATIONS || [], 'loc');
   OPP_DATA = filterToBalqis(EMBEDDED_OPPS || {}, 'opp');
   document.getElementById('locLastLoaded').textContent = 'Embedded';
@@ -2467,6 +2546,10 @@ async function loadLiveOpportunities() {
 function startOppAutoRefresh() {
   if (oppRefreshTimer) clearInterval(oppRefreshTimer);
   oppRefreshTimer = setInterval(function () {
+    if (typeof SELECTED_PROJECT !== 'undefined' && SELECTED_PROJECT && SELECTED_PROJECT !== 'BALQIS RESIDENCE') {
+      if (typeof fetchProjectOpps === 'function') fetchProjectOpps(SELECTED_PROJECT);
+      return;
+    }
     loadLiveOpportunities().catch(function (e) { console.warn('Opp auto-refresh failed:', e.message); setLiveOppStatus('stale', '#E8A33D'); });
   }, OPP_REFRESH_MS);
 }
