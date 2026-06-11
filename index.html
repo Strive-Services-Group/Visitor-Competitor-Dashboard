@@ -2889,25 +2889,29 @@ async function connectLiveOpps() {
 }
 
 window.addEventListener('load', function () {
-  ensureOppGate();
   try { if (typeof setAutoSaveBtn === 'function') setAutoSaveBtn(localStorage.getItem('vbd_autosave') === '1' ? 'on' : 'off'); } catch (e) {}
+  var isReturn = /[#&](code|id_token|access_token|state|error)=/.test(window.location.hash || '') || sessionStorage.getItem(OPP_INFLIGHT_KEY) === '1';
   if (window.location.protocol === 'file:') {
+    ensureOppGate();
     showOppGate('Open this dashboard from its hosted https link to sign in.');
     setLiveOppStatus('host me', '#C0392B');
     return;
   }
+  if (!isReturn) { ensureOppGate(); showOppGate('Checking your sign-in...'); }
   initOppMsal().then(async function () {
-    if (oppReturnedFromRedirect) {
-      try { await goLiveOpps(); }
+    if (oppReturnedFromRedirect || isReturn) {
+      sessionStorage.removeItem(OPP_INFLIGHT_KEY);
+      try { await goLiveOpps(); hideOppGate(); }
       catch (e) {
-        if (e instanceof msal.InteractionRequiredAuthError) { beginOppSignIn(); }
-        else { console.warn('Live load failed:', e.message); showOppGate('Could not load data - click Sign in to retry.'); }
+        if (e instanceof msal.InteractionRequiredAuthError) { ensureOppGate(); beginOppSignIn(); }
+        else { console.warn('Live load failed:', e.message); ensureOppGate(); showOppGate('Could not load data - click Sign in to retry.'); }
       }
     } else {
       sessionStorage.removeItem(OPP_INFLIGHT_KEY);
+      ensureOppGate();
       showOppGate();
     }
-  }).catch(function (e) { console.warn('MSAL init:', e.message); showOppGate('Sign-in unavailable - please retry.'); });
+  }).catch(function (e) { console.warn('MSAL init:', e.message); ensureOppGate(); showOppGate('Sign-in unavailable - please retry.'); });
 });
 
 </script>
