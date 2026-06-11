@@ -515,7 +515,7 @@
       <button class="upload-pill" id="liveOppBtn" onclick="connectLiveOpps()" title="Live Opportunities from Dynamics 365 (auto sign-in, refresh every 5 min)">
         🔌 Live Opps <span class="upill-count" id="liveOppStatus">off</span>
       </button>
-      <button class="upload-pill" onclick="resetToEmbedded()" title="Reset all 3 datasets to the embedded snapshot">↻ Reset</button>
+      <button class="upload-pill" style="display:none" onclick="resetToEmbedded()" title="Reset all 3 datasets to the embedded snapshot">↻ Reset</button>
       <button class="upload-pill" onclick="downloadSummary()" title="Download summary CSV">📊 Summary</button>
       <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" style="display:none;"/>
       <input type="file" id="locFileInput" accept=".xlsx,.xls,.csv" style="display:none;"/>
@@ -614,10 +614,10 @@
 
   <div class="card" style="padding:12px 16px; margin-bottom:12px;">
     <div style="display:flex; gap:14px; flex-wrap:wrap; align-items:center; font-size:12px; color:var(--muted);">
-      <div><strong style="color:var(--slate)">📍 Universe:</strong> <span id="bktUniverse2">—</span> Balqis units</div>
-      <div><strong style="color:var(--slate)">⏰ Aging cutoff:</strong> <span id="bktCutoff2">—</span></div>
-      <div><strong style="color:var(--slate)">📅 Weeks:</strong> <span id="weekRangeLbl">—</span></div>
-      <div><strong style="color:var(--slate)">💾 Snapshots:</strong> <span id="snapshotCount">0</span></div>
+      <div style="display:none"><strong style="color:var(--slate)">📍 Universe:</strong> <span id="bktUniverse2">—</span> Balqis units</div>
+      <div style="display:none"><strong style="color:var(--slate)">⏰ Aging cutoff:</strong> <span id="bktCutoff2">—</span></div>
+      <div style="display:none"><strong style="color:var(--slate)">📅 Weeks:</strong> <span id="weekRangeLbl">—</span></div>
+      <div style="display:none"><strong style="color:var(--slate)">💾 Snapshots:</strong> <span id="snapshotCount">0</span></div>
       <div style="margin-left:auto; display:flex; gap:6px;">
         <button class="btn ghost" style="background:#94A3B8; padding:6px 10px; font-size:12px;" onclick="clearAllSnapshots()" title="Erase all stored weekly snapshots">🗑 Clear History</button>
         <button class="btn" style="padding:6px 12px; font-size:12px;" onclick="exportAllBuckets()">📥 Export All Buckets</button>
@@ -856,8 +856,11 @@ function buildProjectMap() {
   });
   var sel = document.getElementById('projectFilter');
   if (sel) {
-    var names = Object.keys(PROJECT_BUILDINGS).sort();
-    if (!PROJECT_BUILDINGS['BALQIS RESIDENCE']) names.unshift('BALQIS RESIDENCE');
+    var WL = ['SHORELINE 7AND8','BALQIS RESIDENCE','MAG 318','NORTH RESIDENCE','SOUTH RESIDENCE','THE8','BARTON HOUSE 1','EDEN APARTMENTS','FORTUNATO','I RISE TOWER','IRIS BLUE','MONREVE TOWER','THE PRISM TOWER','SEVEN PALM HOTEL AND APTS','RESIDENCE 110','BELGRAVIA SQUARE JVC','CAYAN BUSSINES CENTER','CAYAN BUSINESS CENTER','GOLDEN MILE','SWAY RESIDENCE','THE AUTOGRAPH','WILTON PARK RESIDENCES','J ONE TOWER','SPARKLE TOWERS','DOMUS AL GARHOUD','DOMUS INDIGO'];
+    var norm = function (s) { return String(s).toUpperCase().replace(/&/g,'AND').replace(/[^A-Z0-9]/g,''); };
+    var wlset = {}; WL.forEach(function (w) { wlset[norm(w)] = true; });
+    var names = Object.keys(PROJECT_BUILDINGS).filter(function (p) { return wlset[norm(p)]; }).sort();
+    if (names.indexOf('BALQIS RESIDENCE') < 0) names.unshift('BALQIS RESIDENCE');
     sel.innerHTML = names.map(function (p) { return '<option value="' + p.replace(/"/g,'&quot;') + '"' + (p === SELECTED_PROJECT ? ' selected' : '') + '>' + p + '</option>'; }).join('');
   }
 }
@@ -2895,5 +2898,11 @@ window.addEventListener('load', function () {
 });
 
 </script>
+<style id="uiTrim">
+  button[onclick="clearAllSnapshots()"], button[onclick="exportBucketsJson()"], #autoSaveBtn { display:none !important; }
+  .bk-wk-meta { display:none !important; }
+  #unitMatrixTable th, #unitMatrixTable td { border-right:1px solid #eef2f7; }
+  #unitMatrixTable th:last-child, #unitMatrixTable td:last-child { border-right:none; }
+</style>
 </body>
 </html>
