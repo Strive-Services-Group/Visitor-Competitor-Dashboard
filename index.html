@@ -2792,6 +2792,8 @@ function ensureOppGate() {
       '#oppLoginGate .ogsub{color:#9fb6d4;font-size:13px;margin-bottom:24px;}' +
       '#oppGateBtn{width:100%;border:none;border-radius:12px;padding:15px;font-size:15px;font-weight:700;letter-spacing:1.5px;color:#fff;cursor:pointer;background:linear-gradient(135deg,#2f7de0,#1657c8);box-shadow:0 12px 28px rgba(30,90,200,.45);transition:transform .12s,box-shadow .12s;}' +
       '#oppGateBtn:hover{transform:translateY(-1px);box-shadow:0 16px 36px rgba(30,90,200,.65);}' +
+      '#oppLoginGate .ogspin{width:34px;height:34px;border:3px solid rgba(120,160,210,.25);border-top-color:#2f7de0;border-radius:50%;margin:8px auto 2px;animation:ogspin .9s linear infinite;}' +
+      '@keyframes ogspin{to{transform:rotate(360deg)}}' +
       '#oppLoginGate .ogms{margin-top:14px;font-size:12px;color:#b9cae3;display:flex;align-items:center;justify-content:center;gap:7px;}' +
       '#oppLoginGate .ogsec{margin-top:6px;font-size:11px;color:#7d93b3;}' +
       '#oppLoginGate .ogbadges{margin-top:18px;display:flex;gap:8px;justify-content:center;}' +
@@ -2822,7 +2824,7 @@ function ensureOppGate() {
       '<div class="ogkick">RACE CONTROL</div>' +
       '<h1>Visitor &amp; Competitor<br>Dashboard</h1>' +
       '<div class="ogsub">Secure access for authorised personnel</div>' +
-      '<button id="oppGateBtn">&rarr;&nbsp;&nbsp;SIGN IN</button>' +
+      '<div class="ogspin"></div>' +
       '<div class="ogms"><svg width="14" height="14" viewBox="0 0 23 23"><path fill="#f25022" d="M1 1h10v10H1z"/><path fill="#7fba00" d="M12 1h10v10H12z"/><path fill="#00a4ef" d="M1 12h10v10H1z"/><path fill="#ffb900" d="M12 12h10v10H12z"/></svg> via Microsoft 365</div>' +
       '<div class="ogsec">&#128274; Secured by Azure Active Directory</div>' +
       '<div class="ogbadges"><span class="ogbadge">AZURE AD</span><span class="ogbadge">ENCRYPTED</span><span class="ogbadge">SSO</span></div>' +
@@ -2830,16 +2832,7 @@ function ensureOppGate() {
     '</div>' +
     '<div class="ogfoot">Palm Jumeirah, Dubai &middot; Strive Services Group<div class="ogtag">FOR EXCELLENCE WE STRIVE</div></div>';
   document.body.appendChild(g);
-  g.querySelector('#oppGateBtn').addEventListener('click', async function () {
-    var m = document.getElementById('oppGateMsg');
-    if (m) m.textContent = 'Signing in...';
-    try {
-      if (!oppMsalInstance) await initOppMsal();
-      if (oppAccount) { await goLiveOpps(); hideOppGate(); return; }
-    } catch (e) { console.warn('sign-in click:', e && e.message); }
-    if (m) m.textContent = 'Redirecting to Microsoft sign-in...';
-    beginOppSignIn();
-  });
+  var _gb = g.querySelector('#oppGateBtn'); if (_gb) _gb.addEventListener('click', function () { beginOppSignIn(); });
 }
 function showOppGate(msg) {
   ensureOppGate();
@@ -2890,25 +2883,26 @@ window.addEventListener('load', function () {
   var isReturn = /[#&](code|id_token|access_token|state|error)=/.test(window.location.hash || '') || sessionStorage.getItem(OPP_INFLIGHT_KEY) === '1';
   if (window.location.protocol === 'file:') {
     ensureOppGate();
-    showOppGate('Open this dashboard from its hosted https link to sign in.');
+    showOppGate('Open this dashboard from its hosted https link.');
     setLiveOppStatus('host me', '#C0392B');
     return;
   }
-  if (!isReturn) { ensureOppGate(); showOppGate('Checking your sign-in...'); }
+  ensureOppGate(); showOppGate('Signing you in securely...');
   initOppMsal().then(async function () {
-    if (oppReturnedFromRedirect || isReturn) {
+    if (oppReturnedFromRedirect || oppAccount) {
       sessionStorage.removeItem(OPP_INFLIGHT_KEY);
       try { await goLiveOpps(); hideOppGate(); }
       catch (e) {
-        if (e instanceof msal.InteractionRequiredAuthError) { ensureOppGate(); beginOppSignIn(); }
-        else { console.warn('Live load failed:', e.message); ensureOppGate(); showOppGate('Could not load data - click Sign in to retry.'); }
+        if (e instanceof msal.InteractionRequiredAuthError) { beginOppSignIn(); }
+        else { console.warn('Live load failed:', e.message); showOppGate('Could not load - reload the page to retry.'); }
       }
+    } else if (!isReturn) {
+      beginOppSignIn();
     } else {
       sessionStorage.removeItem(OPP_INFLIGHT_KEY);
-      ensureOppGate();
-      showOppGate();
+      showOppGate('Sign-in did not complete - reload the page to retry.');
     }
-  }).catch(function (e) { console.warn('MSAL init:', e.message); ensureOppGate(); showOppGate('Sign-in unavailable - please retry.'); });
+  }).catch(function (e) { console.warn('MSAL init:', e.message); showOppGate('Sign-in unavailable - reload to retry.'); });
 });
 
 </script>
