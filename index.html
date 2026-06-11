@@ -866,6 +866,9 @@ function loadSnapshots() {
       catch(e) {}
     }
   }
+  if (typeof OPP_CENTRAL_SNAPS !== 'undefined' && OPP_CENTRAL_SNAPS) {
+    for (var _wk in OPP_CENTRAL_SNAPS) { all[_wk] = OPP_CENTRAL_SNAPS[_wk]; }
+  }
   return all;
 }
 function saveSnapshot(weekKey, counts) {
