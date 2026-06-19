@@ -506,17 +506,17 @@
       <label for="fileInput" id="uploadZone" class="upload-pill" title="Upload VMS Visitor sheet (.xlsx)">
         ⬆ VMS <span class="upill-count" id="recordCount">—</span>
       </label>
-      <label for="locFileInput" id="locUploadZone" class="upload-pill" title="Upload All Locations master (.xlsx)">
+      <label for="locFileInput" id="locUploadZone" class="upload-pill" style="display:none" title="Upload All Locations master (.xlsx)">
         📍 Locations <span class="upill-count" id="locRecordCount">—</span>
       </label>
-      <label for="oppFileInput" id="oppUploadZone" class="upload-pill" title="Upload Opportunities sheet (.xlsx)">
+      <label for="oppFileInput" id="oppUploadZone" class="upload-pill" style="display:none" title="Upload Opportunities sheet (.xlsx)">
         🎯 Opps <span class="upill-count" id="oppRecordCount">—</span>
       </label>
       <button class="upload-pill" id="liveOppBtn" onclick="connectLiveOpps()" title="Live Opportunities from Dynamics 365 (auto sign-in, refresh every 5 min)">
         🔌 Live Opps <span class="upill-count" id="liveOppStatus">off</span>
       </button>
       <button class="upload-pill" style="display:none" onclick="resetToEmbedded()" title="Reset all 3 datasets to the embedded snapshot">↻ Reset</button>
-      <button class="upload-pill" onclick="downloadSummary()" title="Download summary CSV">📊 Summary</button>
+      <button class="upload-pill" style="display:none" onclick="downloadSummary()" title="Download summary CSV">📊 Summary</button>
       <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" style="display:none;"/>
       <input type="file" id="locFileInput" accept=".xlsx,.xls,.csv" style="display:none;"/>
       <input type="file" id="oppFileInput" accept=".xlsx,.xls,.csv" style="display:none;"/>
@@ -639,7 +639,7 @@
       #unitMatrixTable th.um-unit,#unitMatrixTable td.um-unit{text-align:left;position:sticky;left:0;background:inherit;width:230px;font-weight:600;color:#26415c;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;}
       #unitMatrixTable th.um-unit{background:#fff;color:#5a6b7d;}
       #unitMatrixTable th.um-change,#unitMatrixTable td.um-change{width:120px;}
-      #unitMatrixTable th.um-bk,#unitMatrixTable td.um-bk{width:60px;}
+      #unitMatrixTable th.um-bk,#unitMatrixTable td.um-bk{width:66px;}
       #unitMatrixTable th.um-occ,#unitMatrixTable td.um-occ{width:112px;text-align:left;}
       #unitMatrixTable th.um-names,#unitMatrixTable td.um-names{text-align:left;overflow:hidden;text-overflow:ellipsis;color:#26415c;font-size:11.5px;}
       #unitMatrixTable .occ-badge{display:inline-block;padding:2px 7px;border-radius:6px;font-size:10.5px;font-weight:700;}
@@ -2724,6 +2724,8 @@ function dvOccupancyForUnit(u) {
   var have = window.DV && DV.occtracker && DV.occtracker.rows;
   if (!DV_OCC_INDEX || (have && DV.occtracker.rows.length !== DV_OCC_STAMP)) dvBuildOccIndex();
   var rows = (DV_OCC_INDEX && DV_OCC_INDEX[u]) || [];
+  // Only actual resident data: records whose Division is blank (concierge-maintained).
+  rows = rows.filter(function (r) { return !(r.division && String(r.division).trim()); });
   if (!rows.length) return { occupiedBy: '', names: '' };
   var hasHoliday = rows.some(function (r) { return r.residentType === 'Holiday Home Company'; });
   var hasTenant = rows.some(function (r) { return r.residentType === 'Tenant'; });
@@ -3055,11 +3057,16 @@ async function dvLoadTable(key, deltaSinceISO) {
 async function loadAllDvTables(delta) {
   if (dvLoading) return;
   dvLoading = true;
-  const keys = Object.keys(DV_TABLES);
+  // Load occupancy first so the Unit Bucket Movement "Occupied By" / "Resident Name(s)"
+  // columns populate quickly on every page load, then re-render before the big tables finish.
+  const keys = ['occtracker', 'contact', 'incident', 'workorder', 'booking'];
   try {
     for (const k of keys) {
       try { await dvLoadTable(k, delta ? DV[k].lastSync : null); }
       catch (e) { console.warn('[DV] load ' + k + ' failed:', e.message); }
+      if (k === 'occtracker') {
+        try { DV_OCC_STAMP = -1; window.dispatchEvent(new CustomEvent('dv-tables-updated', { detail: { partial: true } })); } catch (e) {}
+      }
     }
   } finally { dvLoading = false; }
   const summary = keys.map(k => DV[k].label + ' ' + DV[k].map.size).join(' | ');
