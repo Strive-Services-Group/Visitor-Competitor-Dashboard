@@ -2800,6 +2800,7 @@ async function goLiveOpps() {
   await acquireOppCrmToken();
   await loadLiveOpportunities();
   startOppAutoRefresh();
+  if (typeof bootDvTables === 'function') bootDvTables().catch(function (e) { console.warn('DV tables boot failed:', e.message); });
 }
 
 async function connectLiveOpps() {
@@ -2830,6 +2831,205 @@ window.addEventListener('load', function () {
     }
   }).catch(function (e) { console.warn('MSAL init:', e.message); })
 });
+
+/* ============================================================
+   LIVE DATAVERSE - ADDITIONAL TABLES (data import only)
+   Tables: incident, contact, ssg_occupancytracker (contact location),
+   msdyn_workorder, bookableresourcebooking.
+   - Full load once on sign-in, then a light delta refresh every 2 min
+     (records whose modifiedon changed since the last sync).
+   - Reuses oppCrmGet / acquireOppCrmToken / OPP_CRM_API_BASE from the
+     Opportunity module above.
+   - Scope: Work Orders limited to division "Home Services - Candoo";
+     Bookings limited to those linked Work Orders; Incidents limited to
+     records tied to a Unit/Apartment. Contact + Occupancy = full table.
+   - Data lands in the global DV store (DV.<table>.rows / .map). Display
+     is wired separately.
+============================================================ */
+const DV_DIVISION_CANDOO = '93bd43eb-0a44-ef11-a316-6045bd6a8335'; // Home Services - Candoo
+const DV_REFRESH_MS = 2 * 60 * 1000;   // 2-minute auto-refresh
+const DV_F = '@OData.Community.Display.V1.FormattedValue';
+
+const DV = {
+  incident:   { map: new Map(), lastSync: null, label: 'Incidents' },
+  contact:    { map: new Map(), lastSync: null, label: 'Contacts' },
+  occtracker: { map: new Map(), lastSync: null, label: 'Contact Locations' },
+  workorder:  { map: new Map(), lastSync: null, label: 'Work Orders' },
+  booking:    { map: new Map(), lastSync: null, label: 'Bookings' }
+};
+function dvBU(b, u) { b = b || ''; u = u || ''; return (b || u) ? (b + '_' + u) : ''; }
+
+const DV_TABLES = {
+  incident: {
+    set: 'incidents', id: 'incidentid',
+    select: 'incidentid,title,statuscode,ssg_casenumber,ssg_casetype,ssg_completedby,createdon,modifiedon,ssg_textdepartment,_ssg_building_value,_ssg_category_value,_ssg_project_value,_ssg_subcategory_value,_ssg_unit_value',
+    filter: '_ssg_unit_value ne null',
+    expand: null,
+    map: function (r) { return {
+      id: r.incidentid,
+      title: r.title || '',
+      status: r['statuscode' + DV_F] || '',
+      caseNumber: r.ssg_casenumber || '',
+      caseType: r['ssg_casetype' + DV_F] || '',
+      completedBy: r.ssg_completedby || '',
+      created: r.createdon || '',
+      modified: r.modifiedon || '',
+      department: r.ssg_textdepartment || '',
+      building: r['_ssg_building_value' + DV_F] || '',
+      category: r['_ssg_category_value' + DV_F] || '',
+      project: r['_ssg_project_value' + DV_F] || '',
+      subcategory: r['_ssg_subcategory_value' + DV_F] || '',
+      unit: r['_ssg_unit_value' + DV_F] || ''
+    }; }
+  },
+  contact: {
+    set: 'contacts', id: 'contactid',
+    select: 'contactid,fullname,emailaddress1,mobilephone,modifiedon,_msdyn_accountnumber_value,_ssg_division_value,_ssg_building_value,_ssg_communityproject_value,_ssg_unit_value',
+    filter: null,
+    expand: null,
+    map: function (r) { var b = r['_ssg_building_value' + DV_F] || '', u = r['_ssg_unit_value' + DV_F] || ''; return {
+      id: r.contactid,
+      fullName: r.fullname || '',
+      email: r.emailaddress1 || '',
+      mobile: r.mobilephone || '',
+      modified: r.modifiedon || '',
+      accountNumber: r['_msdyn_accountnumber_value' + DV_F] || '',
+      division: r['_ssg_division_value' + DV_F] || '',
+      building: b,
+      communityProject: r['_ssg_communityproject_value' + DV_F] || '',
+      unit: u,
+      buildingUnit: dvBU(b, u)
+    }; }
+  },
+  occtracker: {
+    set: 'ssg_occupancytrackers', id: 'ssg_occupancytrackerid',
+    select: 'ssg_occupancytrackerid,statecode,ssg_contacttype,ssg_movein,ssg_moveout,ssg_residenttype,modifiedon,_ssg_building_value,_ssg_contact_value,_ssg_division_value,_ssg_project_value,_ssg_unit_value',
+    filter: null,
+    expand: null,
+    map: function (r) { var b = r['_ssg_building_value' + DV_F] || '', u = r['_ssg_unit_value' + DV_F] || ''; return {
+      id: r.ssg_occupancytrackerid,
+      state: r['statecode' + DV_F] || '',
+      contactType: r['ssg_contacttype' + DV_F] || '',
+      moveIn: r.ssg_movein || '',
+      moveOut: r.ssg_moveout || '',
+      residentType: r['ssg_residenttype' + DV_F] || '',
+      modified: r.modifiedon || '',
+      building: b,
+      contactId: r._ssg_contact_value || '',
+      contactName: r['_ssg_contact_value' + DV_F] || '',
+      division: r['_ssg_division_value' + DV_F] || '',
+      project: r['_ssg_project_value' + DV_F] || '',
+      unit: u,
+      buildingUnit: dvBU(b, u)
+    }; }
+  },
+  workorder: {
+    set: 'msdyn_workorders', id: 'msdyn_workorderid',
+    select: 'msdyn_workorderid,msdyn_name,msdyn_systemstatus,ssg_title,ssg_quotenumber,createdon,modifiedon,_msdyn_workordertype_value,_ssg_building_value,_ssg_department_value,_ssg_project_value,_ssg_division_value,_ssg_unit_value',
+    filter: '_ssg_division_value eq ' + DV_DIVISION_CANDOO,
+    expand: null,
+    map: function (r) { var b = r['_ssg_building_value' + DV_F] || '', u = r['_ssg_unit_value' + DV_F] || ''; return {
+      id: r.msdyn_workorderid,
+      name: r.msdyn_name || '',
+      systemStatus: r['msdyn_systemstatus' + DV_F] || '',
+      workOrderType: r['_msdyn_workordertype_value' + DV_F] || '',
+      title: r.ssg_title || '',
+      quoteNumber: r.ssg_quotenumber || '',
+      created: r.createdon || '',
+      modified: r.modifiedon || '',
+      building: b,
+      department: r['_ssg_department_value' + DV_F] || '',
+      project: r['_ssg_project_value' + DV_F] || '',
+      division: r['_ssg_division_value' + DV_F] || '',
+      unit: u,
+      buildingUnit: dvBU(b, u)
+    }; }
+  },
+  booking: {
+    set: 'bookableresourcebookings', id: 'bookableresourcebookingid',
+    select: 'bookableresourcebookingid,duration,ssg_bookingnumber,createdon,modifiedon,ssg_plannedstartdate,ssg_optionsetworkordertype,starttime,_resource_value,_bookingstatus_value,_msdyn_workorder_value',
+    expand: 'msdyn_workorder($select=msdyn_name,ssg_title,ssg_quotenumber,msdyn_systemstatus,_msdyn_workordertype_value,_ssg_project_value,_ssg_building_value,_ssg_unit_value,_ssg_department_value,_ssg_division_value)',
+    filter: 'msdyn_workorder/_ssg_division_value eq ' + DV_DIVISION_CANDOO,
+    map: function (r) { var w = r.msdyn_workorder || {}; var b = w['_ssg_building_value' + DV_F] || '', u = w['_ssg_unit_value' + DV_F] || ''; return {
+      id: r.bookableresourcebookingid,
+      duration: (r['duration' + DV_F] != null ? r['duration' + DV_F] : (r.duration != null ? r.duration : '')),
+      bookingNumber: r.ssg_bookingnumber || '',
+      created: r.createdon || '',
+      modified: r.modifiedon || '',
+      plannedStart: r.ssg_plannedstartdate || '',
+      startDate: r.starttime || '',
+      workOrderType: r['ssg_optionsetworkordertype' + DV_F] || '',
+      resource: r['_resource_value' + DV_F] || '',
+      bookingStatus: r['_bookingstatus_value' + DV_F] || '',
+      workOrderId: r._msdyn_workorder_value || '',
+      workOrderName: w.msdyn_name || r['_msdyn_workorder_value' + DV_F] || '',
+      woTitle: w.ssg_title || '',
+      woProject: w['_ssg_project_value' + DV_F] || '',
+      woBuilding: b,
+      woUnit: u,
+      woDepartment: w['_ssg_department_value' + DV_F] || '',
+      woDivision: w['_ssg_division_value' + DV_F] || '',
+      buildingUnit: dvBU(b, u)
+    }; }
+  }
+};
+
+let dvLoading = false, dvRefreshTimer = null;
+
+async function dvLoadTable(key, deltaSinceISO) {
+  const cfg = DV_TABLES[key], store = DV[key];
+  let url = OPP_CRM_API_BASE + '/' + cfg.set + '?$select=' + cfg.select;
+  if (cfg.expand) url += '&$expand=' + encodeURIComponent(cfg.expand);
+  const filters = [];
+  if (cfg.filter) filters.push(cfg.filter);
+  if (deltaSinceISO) filters.push('modifiedon gt ' + deltaSinceISO);
+  if (filters.length) url += '&$filter=' + encodeURIComponent('(' + filters.join(') and (') + ')');
+  let n = 0, guard = 0, maxMod = store.lastSync;
+  while (url && guard < 300) {
+    const j = await oppCrmGet(url);
+    for (const r of (j.value || [])) {
+      const row = cfg.map(r);
+      store.map.set(row.id, row);
+      n++;
+      if (r.modifiedon && (!maxMod || r.modifiedon > maxMod)) maxMod = r.modifiedon;
+    }
+    url = j['@odata.nextLink'] || null;
+    guard++;
+  }
+  if (maxMod) store.lastSync = maxMod;
+  store.rows = Array.from(store.map.values());
+  return n;
+}
+
+async function loadAllDvTables(delta) {
+  if (dvLoading) return;
+  dvLoading = true;
+  const keys = Object.keys(DV_TABLES);
+  try {
+    for (const k of keys) {
+      try { await dvLoadTable(k, delta ? DV[k].lastSync : null); }
+      catch (e) { console.warn('[DV] load ' + k + ' failed:', e.message); }
+    }
+  } finally { dvLoading = false; }
+  const summary = keys.map(k => DV[k].label + ' ' + DV[k].map.size).join(' | ');
+  console.log('[DV] ' + (delta ? 'delta' : 'full') + ' refresh @ ' + new Date().toLocaleTimeString() + ' -> ' + summary);
+  try { window.dispatchEvent(new CustomEvent('dv-tables-updated', { detail: { delta: !!delta, summary: summary } })); } catch (e) {}
+  if (!delta && typeof toast === 'function') toast('Live tables loaded: ' + summary, 'ok');
+}
+
+function startDvAutoRefresh() {
+  if (dvRefreshTimer) clearInterval(dvRefreshTimer);
+  dvRefreshTimer = setInterval(function () {
+    loadAllDvTables(true).catch(function (e) { console.warn('[DV] auto-refresh failed:', e.message); });
+  }, DV_REFRESH_MS);
+}
+
+async function bootDvTables() {
+  try { await acquireOppCrmToken(); } catch (e) {}
+  await loadAllDvTables(false);
+  startDvAutoRefresh();
+}
+window.DV = DV;
 
 </script>
 <style id="uiTrim">
