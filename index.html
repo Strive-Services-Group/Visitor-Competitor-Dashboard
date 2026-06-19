@@ -39,7 +39,7 @@
   .header {
     background: linear-gradient(135deg, var(--slate) 0%, var(--deep-ocean) 60%, var(--steel) 100%);
     color: #fff;
-    padding: 22px 32px;
+    padding: 11px 32px;
     box-shadow: var(--shadow-lg);
   }
   .header-inner { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
@@ -503,11 +503,11 @@
       </div>
     </div>
     <div class="header-actions" style="gap:6px; align-items:center; flex-wrap:wrap;">
-      <span id="dataMeta" style="font-size:11px; opacity:.85; margin-right:6px;"></span>
-      <span id="weekLiveBadge" style="display:none;font-size:11px;font-weight:700;color:#fff;background:rgba(255,255,255,.16);padding:5px 10px;border-radius:14px;"></span>
-      <span id="authUserChip" style="display:none;align-items:center;gap:6px;font-size:12px;color:#fff;"></span>
-      <button id="signOutBtn" class="upload-pill" style="display:none;" onclick="signOutUser()">⎋ Sign Out</button>
-      <label for="fileInput" id="uploadZone" class="upload-pill" title="Upload VMS Visitor sheet (.xlsx)">
+      <span id="dataMeta" style="order:2;font-size:11px; opacity:.85; margin-right:6px;"></span>
+      <span id="weekLiveBadge" style="order:3;display:none;font-size:11px;font-weight:700;color:#fff;background:rgba(255,255,255,.16);padding:5px 10px;border-radius:14px;"></span>
+      <span id="authUserChip" style="order:8;margin-left:auto;display:none;align-items:center;gap:6px;font-size:12px;color:#fff;"></span>
+      <button id="signOutBtn" class="upload-pill" style="order:9;display:none;" onclick="signOutUser()">⎋ Sign Out</button>
+      <label for="fileInput" id="uploadZone" class="upload-pill" style="order:1;" title="Upload VMS Visitor sheet (.xlsx)">
         ⬆ VMS <span class="upill-count" id="recordCount">—</span>
       </label>
       <label for="locFileInput" id="locUploadZone" class="upload-pill" style="display:none" title="Upload All Locations master (.xlsx)">
@@ -516,7 +516,7 @@
       <label for="oppFileInput" id="oppUploadZone" class="upload-pill" style="display:none" title="Upload Opportunities sheet (.xlsx)">
         🎯 Opps <span class="upill-count" id="oppRecordCount">—</span>
       </label>
-      <button class="upload-pill" id="liveOppBtn" onclick="connectLiveOpps()" title="Live Opportunities from Dynamics 365 (auto sign-in, refresh every 5 min)">
+      <button class="upload-pill" id="liveOppBtn" style="display:none" onclick="connectLiveOpps()" title="Live Opportunities from Dynamics 365 (auto sign-in, refresh every 5 min)">
         🔌 Live Opps <span class="upill-count" id="liveOppStatus">off</span>
       </button>
       <button class="upload-pill" style="display:none" onclick="resetToEmbedded()" title="Reset all 3 datasets to the embedded snapshot">↻ Reset</button>
@@ -2855,7 +2855,7 @@ function openUnitDrill(u) {
       (occ.names ? '<div><strong>Resident:</strong> ' + escHtml(occ.names) + '</div>' : '') +
     '</div>' +
     dvDrillSection('Visit History', visits.length, '<th>Date</th><th>Time</th><th>Company</th><th>Purpose</th><th>Check-in Gate</th>', vrows) +
-    dvDrillSectionId('Candoo Home Services Visits', 'drillCandoo', '<th>Date (Planned)</th><th>Resource</th><th>Purpose</th><th>Status</th>', loading(4)) +
+    dvDrillSectionId('Candoo Home Services Visits', 'drillCandoo', '<th>Date (Planned)</th><th>Resource</th><th>Work Order Title</th><th>Purpose</th><th>Status</th>', loading(5)) +
     dvDrillSectionId('Meetings, Feedback, &amp; Complaint', 'drillMeet', incHead, loading(6)) +
     dvDrillSectionId('Other Cases', 'drillOther', incHead, loading(6));
   openModal('Unit · ' + u, html);
@@ -2877,10 +2877,10 @@ function dvIncRowHtml(r) {
 async function dvDrillFetchUnit(unitId) {
   var F = '@OData.Community.Display.V1.FormattedValue';
   var incUrl = OPP_CRM_API_BASE + '/incidents?$select=title,statuscode,ssg_casenumber,_ssg_category_value,_ssg_subcategory_value,createdon&$filter=' + encodeURIComponent('_ssg_unit_value eq ' + unitId) + '&$orderby=createdon desc';
-  var bkUrl = OPP_CRM_API_BASE + '/bookableresourcebookings?$select=ssg_plannedstartdate,_resource_value,_bookingstatus_value&$expand=msdyn_workorder($select=_ssg_department_value)&$filter=' + encodeURIComponent('msdyn_workorder/_ssg_division_value eq ' + DV_DIVISION_CANDOO + ' and msdyn_workorder/_ssg_unit_value eq ' + unitId) + '&$orderby=ssg_plannedstartdate desc';
+  var bkUrl = OPP_CRM_API_BASE + '/bookableresourcebookings?$select=ssg_plannedstartdate,_resource_value,_bookingstatus_value&$expand=msdyn_workorder($select=_ssg_department_value,ssg_title)&$filter=' + encodeURIComponent('msdyn_workorder/_ssg_division_value eq ' + DV_DIVISION_CANDOO + ' and msdyn_workorder/_ssg_unit_value eq ' + unitId) + '&$orderby=ssg_plannedstartdate desc';
   var r = await Promise.all([oppCrmGet(incUrl), oppCrmGet(bkUrl)]);
   var incs = (r[0].value || []).map(function (x) { return { created: x.createdon, caseNumber: x.ssg_casenumber, title: x.title, category: x['_ssg_category_value' + F] || '', subcategory: x['_ssg_subcategory_value' + F] || '', status: x['statuscode' + F] || '' }; });
-  var bookings = (r[1].value || []).map(function (x) { var w = x.msdyn_workorder || {}; return { planned: x.ssg_plannedstartdate, resource: x['_resource_value' + F] || '', dept: w['_ssg_department_value' + F] || '', status: x['_bookingstatus_value' + F] || '' }; });
+  var bookings = (r[1].value || []).map(function (x) { var w = x.msdyn_workorder || {}; return { planned: x.ssg_plannedstartdate, resource: x['_resource_value' + F] || '', title: w.ssg_title || '', dept: w['_ssg_department_value' + F] || '', status: x['_bookingstatus_value' + F] || '' }; });
   return { bookings: bookings, meetings: incs.filter(dvIsMeetingIncident), others: incs.filter(function (x) { return !dvIsMeetingIncident(x); }) };
 }
 async function dvFillDrill(u) {
@@ -2890,13 +2890,15 @@ async function dvFillDrill(u) {
     if (unitId && typeof oppCrmGet === 'function') {
       data = await dvDrillFetchUnit(unitId);
     } else {
-      var bk = dvRowsForUnit('booking', u).map(function (r) { return { planned: r.plannedStart, resource: r.resource, dept: r.woDepartment, status: r.bookingStatus }; });
+      var bk = dvRowsForUnit('booking', u).map(function (r) { return { planned: r.plannedStart, resource: r.resource, title: r.woTitle, dept: r.woDepartment, status: r.bookingStatus }; });
       var inc = dvRowsForUnit('incident', u);
       data = { bookings: bk, meetings: inc.filter(dvIsMeetingIncident), others: inc.filter(function (r) { return !dvIsMeetingIncident(r); }) };
     }
-    data.bookings.sort(function (a, b) { return (b.planned || '').localeCompare(a.planned || ''); });
-    var brows = data.bookings.map(function (r) { return '<tr><td>' + escHtml(dvFmtDT(r.planned)) + '</td><td>' + escHtml(r.resource || '') + '</td><td>' + escHtml(r.dept || '') + '</td><td>' + escHtml(r.status || '') + '</td></tr>'; }).join('');
-    dvSetSection('drillCandoo', brows, data.bookings.length, 4);
+    // Drop duplicate team rows (resource = "... Team Leader" / "... Team Member").
+    var bks = data.bookings.filter(function (r) { var n = (r.resource || '').toLowerCase(); return n.indexOf('team member') < 0 && n.indexOf('team leader') < 0; });
+    bks.sort(function (a, b) { return (b.planned || '').localeCompare(a.planned || ''); });
+    var brows = bks.map(function (r) { return '<tr><td>' + escHtml(dvFmtDT(r.planned)) + '</td><td>' + escHtml(r.resource || '') + '</td><td>' + escHtml(r.title || '') + '</td><td>' + escHtml(r.dept || '') + '</td><td>' + escHtml(r.status || '') + '</td></tr>'; }).join('');
+    dvSetSection('drillCandoo', brows, bks.length, 5);
     dvSetSection('drillMeet', data.meetings.map(dvIncRowHtml).join(''), data.meetings.length, 6);
     dvSetSection('drillOther', data.others.map(dvIncRowHtml).join(''), data.others.length, 6);
   } catch (e) {
