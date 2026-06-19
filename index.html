@@ -470,9 +470,10 @@
       <h1 class="splash-title">Visitor &amp; Competitor Dashboard</h1>
       <div class="splash-blurb">Secure access for authorised personnel</div>
       <div class="splash-divider"></div>
-      <button class="splash-signin" onclick="dismissSplash()">
+      <button class="splash-signin" id="splashSignInBtn" onclick="splashSignIn()">
         <span>➜</span> SIGN IN
       </button>
+      <div id="splashErr" style="color:#ffd2d2;font-size:12px;margin-top:10px;min-height:14px;"></div>
       <div class="splash-m365">
         <span class="splash-m365-logo"><span></span><span></span><span></span><span></span></span>
         via Microsoft 365
@@ -503,6 +504,9 @@
     </div>
     <div class="header-actions" style="gap:6px; align-items:center; flex-wrap:wrap;">
       <span id="dataMeta" style="font-size:11px; opacity:.85; margin-right:6px;"></span>
+      <span id="weekLiveBadge" style="display:none;font-size:11px;font-weight:700;color:#fff;background:rgba(255,255,255,.16);padding:5px 10px;border-radius:14px;"></span>
+      <span id="authUserChip" style="display:none;align-items:center;gap:6px;font-size:12px;color:#fff;"></span>
+      <button id="signOutBtn" class="upload-pill" style="display:none;" onclick="signOutUser()">⎋ Sign Out</button>
       <label for="fileInput" id="uploadZone" class="upload-pill" title="Upload VMS Visitor sheet (.xlsx)">
         ⬆ VMS <span class="upill-count" id="recordCount">—</span>
       </label>
@@ -2711,15 +2715,19 @@ function toggleAutoSave() {
 /* Occupancy (Contact Location / ssg_occupancytracker) lookup for the matrix.
    Occupied By: Holiday Home Company -> "Holiday Home"; else Tenant -> "Tenant";
    else "Owner". Resident name(s): primary contacts within that category. */
-var DV_OCC_INDEX = null, DV_OCC_STAMP = -1;
+var DV_OCC_INDEX = null, DV_OCC_STAMP = -1, DV_UNITID_BY_KEY = {};
 function dvBuildOccIndex() {
-  var idx = {};
+  var idx = {}, uid = {};
   if (window.DV && DV.occtracker && DV.occtracker.rows) {
     var rows = DV.occtracker.rows;
-    for (var i = 0; i < rows.length; i++) { var r = rows[i]; if (!r.buildingUnit) continue; (idx[r.buildingUnit] = idx[r.buildingUnit] || []).push(r); }
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i]; if (!r.buildingUnit) continue;
+      (idx[r.buildingUnit] = idx[r.buildingUnit] || []).push(r);
+      if (r.unitId && !uid[r.buildingUnit]) uid[r.buildingUnit] = r.unitId;
+    }
     DV_OCC_STAMP = rows.length;
   } else { DV_OCC_STAMP = -1; }
-  DV_OCC_INDEX = idx;
+  DV_OCC_INDEX = idx; DV_UNITID_BY_KEY = uid;
   return idx;
 }
 function dvOccupancyForUnit(u) {
@@ -2835,23 +2843,9 @@ function openUnitDrill(u) {
     return '<tr><td>' + escHtml(r.date || '') + '</td><td>' + escHtml(r.time || '') + '</td><td>' + escHtml(r.company || '') + '</td><td>' + escHtml(r.purpose || '') + '</td><td>' + escHtml(r.gate || '') + '</td></tr>';
   }).join('') || '<tr><td colspan="5" style="color:#9aa7b5;">No visits recorded</td></tr>';
 
-  // 2) Candoo Home Services Visits (bookings) — date = planned start, purpose = department.
-  var bookings = dvRowsForUnit('booking', u).sort(function (a, b) { return (b.plannedStart || b.created || '').localeCompare(a.plannedStart || a.created || ''); });
-  var brows = bookings.map(function (r) {
-    return '<tr><td>' + escHtml(dvFmtDT(r.plannedStart)) + '</td><td>' + escHtml(r.resource || '') + '</td><td>' + escHtml(r.woDepartment || '') + '</td><td>' + escHtml(r.bookingStatus || '') + '</td></tr>';
-  }).join('') || '<tr><td colspan="4" style="color:#9aa7b5;">No Candoo visits</td></tr>';
-
-  // 3 & 4) Incidents for this unit, split by the meeting rule.
-  var incs = dvRowsForUnit('incident', u).sort(function (a, b) { return (b.created || '').localeCompare(a.created || ''); });
-  var meetings = incs.filter(dvIsMeetingIncident);
-  var others = incs.filter(function (r) { return !dvIsMeetingIncident(r); });
-  function incRow(r) {
-    return '<tr><td>' + escHtml(dvFmtDT(r.created)) + '</td><td>' + escHtml(r.caseNumber || '') + '</td><td>' + escHtml(r.title || '') + '</td><td>' + escHtml(r.category || '') + '</td><td>' + escHtml(r.subcategory || '') + '</td><td>' + escHtml(r.status || '') + '</td></tr>';
-  }
-  var mrows = meetings.map(incRow).join('') || '<tr><td colspan="6" style="color:#9aa7b5;">No records</td></tr>';
-  var crows = others.map(incRow).join('') || '<tr><td colspan="6" style="color:#9aa7b5;">No records</td></tr>';
-
+  // 2-4) Candoo bookings + incidents are fetched LIVE per-unit (instant + always current).
   var incHead = '<th>Date</th><th>Case #</th><th>Title</th><th>Category</th><th>Sub-category</th><th>Status</th>';
+  var loading = function (c) { return '<tr><td colspan="' + c + '" style="color:#9aa7b5;">Loading…</td></tr>'; };
   var html =
     '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px;font-size:13px;">' +
       '<div><strong>Building:</strong> ' + escHtml(m.building || '') + '</div>' +
@@ -2861,32 +2855,114 @@ function openUnitDrill(u) {
       (occ.names ? '<div><strong>Resident:</strong> ' + escHtml(occ.names) + '</div>' : '') +
     '</div>' +
     dvDrillSection('Visit History', visits.length, '<th>Date</th><th>Time</th><th>Company</th><th>Purpose</th><th>Check-in Gate</th>', vrows) +
-    dvDrillSection('Candoo Home Services Visits', bookings.length, '<th>Date (Planned)</th><th>Resource</th><th>Purpose</th><th>Status</th>', brows) +
-    dvDrillSection('Meetings, Feedback, &amp; Complaint', meetings.length, incHead, mrows) +
-    dvDrillSection('Other Cases', others.length, incHead, crows);
+    dvDrillSectionId('Candoo Home Services Visits', 'drillCandoo', '<th>Date (Planned)</th><th>Resource</th><th>Purpose</th><th>Status</th>', loading(4)) +
+    dvDrillSectionId('Meetings, Feedback, &amp; Complaint', 'drillMeet', incHead, loading(6)) +
+    dvDrillSectionId('Other Cases', 'drillOther', incHead, loading(6));
   openModal('Unit · ' + u, html);
+  dvFillDrill(u);
+}
+
+function dvDrillSectionId(title, id, head, rows) {
+  return '<h3 style="margin:14px 0 6px;font-size:14px;">' + title + ' (<span id="' + id + 'Cnt">…</span>)</h3>' +
+    '<div class="drill-scroll"><table class="drill-tbl"><thead><tr>' + head + '</tr></thead><tbody id="' + id + 'Body">' + rows + '</tbody></table></div>';
+}
+function dvSetSection(id, rows, count, cols) {
+  var b = document.getElementById(id + 'Body');
+  if (b) b.innerHTML = rows || ('<tr><td colspan="' + cols + '" style="color:#9aa7b5;">No records</td></tr>');
+  var c = document.getElementById(id + 'Cnt'); if (c) c.textContent = count;
+}
+function dvIncRowHtml(r) {
+  return '<tr><td>' + escHtml(dvFmtDT(r.created)) + '</td><td>' + escHtml(r.caseNumber || '') + '</td><td>' + escHtml(r.title || '') + '</td><td>' + escHtml(r.category || '') + '</td><td>' + escHtml(r.subcategory || '') + '</td><td>' + escHtml(r.status || '') + '</td></tr>';
+}
+async function dvDrillFetchUnit(unitId) {
+  var F = '@OData.Community.Display.V1.FormattedValue';
+  var incUrl = OPP_CRM_API_BASE + '/incidents?$select=title,statuscode,ssg_casenumber,_ssg_category_value,_ssg_subcategory_value,createdon&$filter=' + encodeURIComponent('_ssg_unit_value eq ' + unitId) + '&$orderby=createdon desc';
+  var bkUrl = OPP_CRM_API_BASE + '/bookableresourcebookings?$select=ssg_plannedstartdate,_resource_value,_bookingstatus_value&$expand=msdyn_workorder($select=_ssg_department_value)&$filter=' + encodeURIComponent('msdyn_workorder/_ssg_division_value eq ' + DV_DIVISION_CANDOO + ' and msdyn_workorder/_ssg_unit_value eq ' + unitId) + '&$orderby=ssg_plannedstartdate desc';
+  var r = await Promise.all([oppCrmGet(incUrl), oppCrmGet(bkUrl)]);
+  var incs = (r[0].value || []).map(function (x) { return { created: x.createdon, caseNumber: x.ssg_casenumber, title: x.title, category: x['_ssg_category_value' + F] || '', subcategory: x['_ssg_subcategory_value' + F] || '', status: x['statuscode' + F] || '' }; });
+  var bookings = (r[1].value || []).map(function (x) { var w = x.msdyn_workorder || {}; return { planned: x.ssg_plannedstartdate, resource: x['_resource_value' + F] || '', dept: w['_ssg_department_value' + F] || '', status: x['_bookingstatus_value' + F] || '' }; });
+  return { bookings: bookings, meetings: incs.filter(dvIsMeetingIncident), others: incs.filter(function (x) { return !dvIsMeetingIncident(x); }) };
+}
+async function dvFillDrill(u) {
+  var unitId = (typeof DV_UNITID_BY_KEY !== 'undefined' && DV_UNITID_BY_KEY) ? DV_UNITID_BY_KEY[u] : null;
+  try {
+    var data;
+    if (unitId && typeof oppCrmGet === 'function') {
+      data = await dvDrillFetchUnit(unitId);
+    } else {
+      var bk = dvRowsForUnit('booking', u).map(function (r) { return { planned: r.plannedStart, resource: r.resource, dept: r.woDepartment, status: r.bookingStatus }; });
+      var inc = dvRowsForUnit('incident', u);
+      data = { bookings: bk, meetings: inc.filter(dvIsMeetingIncident), others: inc.filter(function (r) { return !dvIsMeetingIncident(r); }) };
+    }
+    data.bookings.sort(function (a, b) { return (b.planned || '').localeCompare(a.planned || ''); });
+    var brows = data.bookings.map(function (r) { return '<tr><td>' + escHtml(dvFmtDT(r.planned)) + '</td><td>' + escHtml(r.resource || '') + '</td><td>' + escHtml(r.dept || '') + '</td><td>' + escHtml(r.status || '') + '</td></tr>'; }).join('');
+    dvSetSection('drillCandoo', brows, data.bookings.length, 4);
+    dvSetSection('drillMeet', data.meetings.map(dvIncRowHtml).join(''), data.meetings.length, 6);
+    dvSetSection('drillOther', data.others.map(dvIncRowHtml).join(''), data.others.length, 6);
+  } catch (e) {
+    console.warn('[DV] drill fetch failed:', e.message);
+    ['drillCandoo', 'drillMeet', 'drillOther'].forEach(function (id) { var b = document.getElementById(id + 'Body'); if (b) b.innerHTML = '<tr><td colspan="6" style="color:#C0392B;">Could not load (' + escHtml(e.message) + ')</td></tr>'; });
+  }
 }
 
 function ensureOppGate() {}
 function showOppGate(msg) {}
 function hideOppGate() {}
 
-async function beginOppSignIn() {
-  if (window.location.protocol === 'file:') {
-    var mf = document.getElementById('oppGateMsg');
-    if (mf) mf.textContent = 'Sign-in works only on the hosted https link, not a local file.';
-    setLiveOppStatus('host me', '#C0392B');
-    return;
+function dvIsoWeek(d) {
+  var t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  var day = t.getUTCDay() || 7; t.setUTCDate(t.getUTCDate() + 4 - day);
+  var ys = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  return Math.ceil((((t - ys) / 86400000) + 1) / 7);
+}
+function updateAuthHeader() {
+  var name = (oppAccount && (oppAccount.name || oppAccount.username)) || '';
+  var chip = document.getElementById('authUserChip');
+  var so = document.getElementById('signOutBtn');
+  var wk = document.getElementById('weekLiveBadge');
+  if (chip && name) {
+    var initials = (name.replace(/[^A-Za-z ]/g, '').split(/\s+/).filter(Boolean).slice(0, 2).map(function (x) { return x[0].toUpperCase(); }).join('')) || name.slice(0, 2).toUpperCase();
+    chip.style.display = 'inline-flex';
+    chip.innerHTML = '<span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#618FB4;color:#fff;font-size:10px;font-weight:700;">' + escHtml(initials) + '</span> <span style="font-weight:600;">' + escHtml(name) + '</span>';
   }
+  if (so) so.style.display = 'inline-block';
+  if (wk) {
+    var now = new Date();
+    var s = (typeof getWeekStart === 'function') ? getWeekStart(now) : now;
+    var e = (typeof getWeekEnd === 'function') ? getWeekEnd(now) : now;
+    var mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    var range = s.getDate() + ' ' + mon[s.getMonth()] + ' - ' + e.getDate() + ' ' + mon[e.getMonth()] + ' ' + e.getFullYear();
+    wk.style.display = 'inline-block';
+    wk.innerHTML = 'Week ' + dvIsoWeek(now) + ' | ' + range + ' <span style="color:#36d399;font-weight:800;margin-left:5px;">&#9679; LIVE</span>';
+  }
+}
+async function splashSignIn() {
+  var btn = document.getElementById('splashSignInBtn');
+  var err = document.getElementById('splashErr');
+  if (err) err.textContent = '';
+  if (window.location.protocol === 'file:') { if (err) err.textContent = 'Sign-in works only on the hosted https link, not a local file.'; return; }
   try {
+    if (btn) btn.disabled = true;
     if (!oppMsalInstance) await initOppMsal();
-    sessionStorage.setItem(OPP_INFLIGHT_KEY, '1');
-    await oppMsalInstance.loginRedirect(OPP_LOGIN_REQUEST);
+    var res = await oppMsalInstance.loginPopup(OPP_LOGIN_REQUEST);
+    if (res && res.account) oppAccount = res.account;
+    else { var a = oppMsalInstance.getAllAccounts(); if (a.length) oppAccount = a[0]; }
+    if (!oppAccount) throw new Error('No account returned');
+    oppMsalInstance.setActiveAccount(oppAccount);
+    updateAuthHeader();
+    dismissSplash();
+    await goLiveOpps();
   } catch (e) {
     console.error('Sign-in failed:', e);
-    var me = document.getElementById('oppGateMsg');
-    if (me) me.textContent = 'Sign-in error: ' + (e.message || e);
-  }
+    if (err) err.textContent = 'Sign-in failed: ' + (e.message || e);
+  } finally { if (btn) btn.disabled = false; }
+}
+async function beginOppSignIn() { return splashSignIn(); }
+async function signOutUser() {
+  try { if (oppMsalInstance && oppAccount) await oppMsalInstance.logoutPopup({ account: oppAccount }); }
+  catch (e) { console.warn('Sign-out:', e.message); }
+  try { oppAccount = null; oppCrmToken = null; } catch (e) {}
+  location.reload();
 }
 
 async function goLiveOpps() {
@@ -2910,19 +2986,16 @@ async function connectLiveOpps() {
 window.addEventListener('load', function () {
   try { if (typeof setAutoSaveBtn === 'function') setAutoSaveBtn(localStorage.getItem('vbd_autosave') === '1' ? 'on' : 'off'); } catch (e) {}
   if (window.location.protocol === 'file:') { setLiveOppStatus('host me', '#C0392B'); return; }
-  var isReturn = /[#&](code|id_token|access_token|state|error)=/.test(window.location.hash || '') || sessionStorage.getItem(OPP_INFLIGHT_KEY) === '1';
+  // No auto-redirect: if already signed in, load straight away; otherwise the
+  // splash gate stays and the user signs in via the SIGN IN button (popup).
   initOppMsal().then(async function () {
-    if (oppReturnedFromRedirect || oppAccount) {
-      sessionStorage.removeItem(OPP_INFLIGHT_KEY);
+    if (oppAccount) {
+      updateAuthHeader();
+      dismissSplash();
       try { await goLiveOpps(); }
-      catch (e) { if (e instanceof msal.InteractionRequiredAuthError) { beginOppSignIn(); } else { console.warn('Live load failed:', e.message); } }
-    } else if (!isReturn) {
-      beginOppSignIn();
-    } else {
-      sessionStorage.removeItem(OPP_INFLIGHT_KEY);
-      console.warn('Sign-in not completed; reload to retry.');
+      catch (e) { console.warn('Live load failed:', e.message); }
     }
-  }).catch(function (e) { console.warn('MSAL init:', e.message); })
+  }).catch(function (e) { console.warn('MSAL init:', e.message); });
 });
 
 /* ============================================================
@@ -2950,7 +3023,7 @@ const DV = {
   workorder:  { map: new Map(), lastSync: null, label: 'Work Orders' },
   booking:    { map: new Map(), lastSync: null, label: 'Bookings' }
 };
-function dvBU(b, u) { b = b || ''; u = u || ''; return (b || u) ? (b + '_' + u) : ''; }
+function dvBU(b, u) { b = (b || '').trim(); u = (u || '').trim(); return (b || u) ? (b + '_' + u) : ''; }
 
 const DV_TABLES = {
   incident: {
@@ -3009,6 +3082,7 @@ const DV_TABLES = {
       residentType: r['ssg_residenttype' + DV_F] || '',
       modified: r.modifiedon || '',
       building: b,
+      unitId: r._ssg_unit_value || '',
       contactId: r._ssg_contact_value || '',
       contactName: r['_ssg_contact_value' + DV_F] || '',
       division: r['_ssg_division_value' + DV_F] || '',
