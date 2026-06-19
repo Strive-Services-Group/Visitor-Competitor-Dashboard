@@ -39,7 +39,7 @@
   .header {
     background: linear-gradient(135deg, var(--slate) 0%, var(--deep-ocean) 60%, var(--steel) 100%);
     color: #fff;
-    padding: 11px 32px;
+    padding: 9px 32px;
     box-shadow: var(--shadow-lg);
   }
   .header-inner { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
@@ -239,7 +239,7 @@
     box-shadow: 0 2px 6px rgba(31,70,107,0.06);
   }
   .tab-btn {
-    background: transparent; border: none; padding: 14px 22px;
+    background: transparent; border: none; padding: 8px 22px;
     font-family: inherit; font-size: 14px; font-weight: 700; color: var(--muted);
     cursor: pointer; border-bottom: 3px solid transparent;
     transition: all .15s ease; letter-spacing: .3px;
@@ -275,7 +275,7 @@
   .bk-row-line { display:flex; justify-content:space-between; align-items:baseline; gap:6px; }
   .bk-wk-lbl   { font-size: 11px; color: var(--ink); font-weight: 700; }
   .bk-wk-meta  { font-size: 10px; color: var(--muted); margin-top:1px; font-variant-numeric: tabular-nums; }
-  .bk-wk-val   { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--ink); white-space:nowrap; line-height: 1; }
+  .bk-wk-val   { font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--ink); white-space:nowrap; line-height: 1; }
   .bk-wk-val.dash { color: #CBD5E1; font-size: 18px; }
   .bk-row.bk-row-current .bk-wk-val { font-size: 26px; }
   .bk-arrow {
@@ -499,7 +499,6 @@
       <div class="brand-logo" style="background:#fff;padding:5px 9px;display:flex;align-items:center;border-radius:8px;width:auto;"><img src="logo.png" alt="STRIVE" style="height:30px;width:auto;display:block;" onerror="this.style.display=&#39;none&#39;;this.parentNode.style.background=&#39;transparent&#39;;this.parentNode.textContent=&#39;S&amp;C&#39;;"></div>
       <div>
         <h1>Resident 360 / Visitor Dashboard</h1>
-        <p>S &amp; C Building Maintenance L.L.C — Competitive Footprint Analysis</p>
       </div>
     </div>
     <div class="header-actions" style="gap:6px; align-items:center; flex-wrap:wrap;">
@@ -672,7 +671,7 @@
       <label style="font-size:12px;display:flex;align-items:center;gap:5px;cursor:pointer;color:#5a6b7d;"><input type="checkbox" id="unitMatrixMoversOnly" onchange="renderUnitMatrix()"> Movers only</label>
       <span id="unitMatrixMeta" style="margin-left:auto;font-size:12px;color:var(--muted);"></span>
     </div>
-    <div style="overflow:auto;max-height:560px;border:1px solid #eef1f5;border-radius:10px;">
+    <div style="overflow:auto;max-height:680px;border:1px solid #eef1f5;border-radius:10px;">
       <table id="unitMatrixTable"></table>
     </div>
     <div style="font-size:11px;color:var(--muted);margin-top:8px;display:flex;gap:16px;flex-wrap:wrap;">
@@ -892,6 +891,7 @@ async function applyProject(p) {
     OPP_DATA = {}; recomputeAll();
     if (typeof oppAccount !== 'undefined' && oppAccount) fetchProjectOpps(SELECTED_PROJECT);
   }
+  if (typeof refreshProjectBookings === 'function') refreshProjectBookings();
 }
 async function fetchProjectOpps(project) {
   try {
@@ -923,6 +923,52 @@ async function fetchProjectOpps(project) {
   } catch (e) { console.warn('project opps failed', e.message); }
 }
 
+/* ---- Candoo bookings as OUR engagement (per project, live + cached) ----
+   Replaces "our visits" (formerly VMS S&C rows) with Candoo Home Services
+   bookings so every project populates. Team Leader/Member rows excluded.
+   Department is canonicalised (canonService) to compare same/diff service. */
+var PROJECT_BOOKING_MAP = {};      // buildingUnit -> { count, services:Set }
+var PROJECT_BOOKING_CACHE = {};    // project name -> map
+var _projBookingLoading = '';
+function dvOurVisitTotal() { var t = 0; for (var k in PROJECT_BOOKING_MAP) t += PROJECT_BOOKING_MAP[k].count; return t; }
+async function fetchProjectBookings(project) {
+  if (typeof oppCrmGet !== 'function' || typeof oppAccount === 'undefined' || !oppAccount) return;
+  if (PROJECT_BOOKING_CACHE[project]) { PROJECT_BOOKING_MAP = PROJECT_BOOKING_CACHE[project]; return; }
+  if (_projBookingLoading === project) return;
+  _projBookingLoading = project;
+  try {
+    var F = '@OData.Community.Display.V1.FormattedValue';
+    var pj = await oppCrmGet(OPP_CRM_API_BASE + "/msdyn_functionallocations?$select=msdyn_functionallocationid&$filter=" + encodeURIComponent("msdyn_name eq '" + project.replace(/'/g, "''") + "'") + "&$top=1");
+    var pid = (pj.value && pj.value[0]) ? pj.value[0].msdyn_functionallocationid : null;
+    if (!pid) { PROJECT_BOOKING_MAP = {}; return; }
+    var url = OPP_CRM_API_BASE + '/bookableresourcebookings?$select=_resource_value&$expand=msdyn_workorder($select=_ssg_building_value,_ssg_unit_value,_ssg_department_value)&$filter=' + encodeURIComponent('msdyn_workorder/_ssg_division_value eq ' + DV_DIVISION_CANDOO + ' and msdyn_workorder/_ssg_project_value eq ' + pid);
+    var map = {}, guard = 0;
+    while (url && guard < 60) {
+      var j = await oppCrmGet(url);
+      var arr = j.value || [];
+      for (var i = 0; i < arr.length; i++) {
+        var x = arr[i], w = x.msdyn_workorder || {};
+        var res = (x['_resource_value' + F] || '').toLowerCase();
+        if (res.indexOf('team leader') >= 0 || res.indexOf('team member') >= 0) continue; // drop duplicate team rows
+        var b = (w['_ssg_building_value' + F] || '').trim(), un = (w['_ssg_unit_value' + F] || '').trim();
+        if (!b && !un) continue;
+        var key = b + '_' + un;
+        if (!map[key]) map[key] = { count: 0, services: new Set() };
+        map[key].count++;
+        map[key].services.add(canonService(w['_ssg_department_value' + F] || ''));
+      }
+      url = j['@odata.nextLink'] || null; guard++;
+    }
+    PROJECT_BOOKING_CACHE[project] = map;
+    PROJECT_BOOKING_MAP = map;
+  } catch (e) { console.warn('project bookings failed:', e.message); }
+  finally { _projBookingLoading = ''; }
+}
+function refreshProjectBookings() {
+  var p = SELECTED_PROJECT;
+  return fetchProjectBookings(p).then(function () { if (SELECTED_PROJECT === p) recomputeAll(); });
+}
+
 /* ============================================================
    ISO WEEK + SNAPSHOT STORAGE
 ============================================================ */
@@ -952,21 +998,27 @@ function fmtDate(d) { return d.toISOString().slice(0,10); }
 
 function loadSnapshots() {
   const all = {};
+  const proj = (typeof SELECTED_PROJECT !== 'undefined' ? SELECTED_PROJECT : 'ALL');
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
     if (k && k.startsWith(SNAPSHOT_PREFIX)) {
-      try { all[k.slice(SNAPSHOT_PREFIX.length)] = JSON.parse(localStorage.getItem(k)); }
-      catch(e) {}
+      const rest = k.slice(SNAPSHOT_PREFIX.length);
+      const sep = rest.indexOf('|');
+      if (sep < 0) continue; // legacy global snapshot — ignore (per-project only now)
+      if (rest.slice(0, sep) !== proj) continue;
+      try { all[rest.slice(sep + 1)] = JSON.parse(localStorage.getItem(k)); } catch(e) {}
     }
   }
-  if (typeof OPP_CENTRAL_SNAPS !== 'undefined' && OPP_CENTRAL_SNAPS) {
-    for (var _wk in OPP_CENTRAL_SNAPS) { all[_wk] = OPP_CENTRAL_SNAPS[_wk]; }
+  // Central (buckets.json) history applies to Balqis only.
+  if (proj === 'BALQIS RESIDENCE' && typeof OPP_CENTRAL_SNAPS !== 'undefined' && OPP_CENTRAL_SNAPS) {
+    for (var _wk in OPP_CENTRAL_SNAPS) { if (!(_wk in all)) all[_wk] = OPP_CENTRAL_SNAPS[_wk]; }
   }
   return all;
 }
 function saveSnapshot(weekKey, counts) {
   try {
-    localStorage.setItem(SNAPSHOT_PREFIX + weekKey, JSON.stringify({ counts, ts: new Date().toISOString() }));
+    var pk = (typeof SELECTED_PROJECT !== 'undefined' ? SELECTED_PROJECT : 'ALL') + '|' + weekKey;
+    localStorage.setItem(SNAPSHOT_PREFIX + pk, JSON.stringify({ counts, ts: new Date().toISOString() }));
   } catch(e) { console.warn('localStorage failed', e); }
 }
 function clearAllSnapshots() {
@@ -1263,10 +1315,11 @@ function resetToEmbedded() {
 }
 
 function loadData(records, label) {
-  DATA = records;
+  // Exclude our own companies (Candoo / S & C / Strive) — our visits come from bookings.
+  DATA = (records || []).filter(function (r) { return !(typeof dvIsOurCompany === 'function' && dvIsOurCompany(r.company)); });
   document.getElementById('lastLoaded').textContent = label;
-  document.getElementById('recordCount').textContent = records.length.toLocaleString();
-  const dates = records.map(r => r.date).filter(Boolean).sort();
+  document.getElementById('recordCount').textContent = DATA.length.toLocaleString();
+  const dates = DATA.map(r => r.date).filter(Boolean).sort();
   document.getElementById('dataMeta').textContent =
     dates.length ? `${dates[0]} → ${dates[dates.length-1]}` : '';
   recomputeAll();
@@ -1305,14 +1358,14 @@ function classifyAt(cutoff) {
   const aging = fmtDate(agingD);
 
   // Per-unit VMS aggregation — only rows with date <= cutoff
+  // VMS is COMPETITOR-only now (our companies excluded; our visits come from bookings).
   const vmsMap = {};
   for (const r of DATA) {
     if (!r.unit || !r.date || r.date > cutoff) continue;
-    if (!vmsMap[r.unit]) vmsMap[r.unit] = { sc: new Set(), comp: new Set(), scN:0, compN:0, vendors:new Set() };
+    if (typeof dvIsOurCompany === 'function' && dvIsOurCompany(r.company)) continue;
+    if (!vmsMap[r.unit]) vmsMap[r.unit] = { comp: new Set(), compN:0, vendors:new Set() };
     const e = vmsMap[r.unit];
-    const cs = canonService(r.purpose);
-    if (r.company === MY_COMPANY) { e.sc.add(cs); e.scN++; }
-    else if (r.company) { e.comp.add(cs); e.compN++; e.vendors.add(r.company); }
+    if (r.company) { e.comp.add(canonService(r.purpose)); e.compN++; e.vendors.add(r.company); }
   }
 
   // Per-unit Opp aggregation — filter individual opp dates by cutoff
@@ -1323,23 +1376,24 @@ function classifyAt(cutoff) {
   // -> So classifyAt() at the current cutoff is exact; historical cutoffs use saved snapshots.
   for (const loc of LOC_DATA) {
     const u = loc.u;
-    const vms = vmsMap[u] || { sc:new Set(), comp:new Set(), scN:0, compN:0, vendors:new Set() };
+    const vms = vmsMap[u] || { comp:new Set(), compN:0, vendors:new Set() };
+    const bk = (typeof PROJECT_BOOKING_MAP !== 'undefined' && PROJECT_BOOKING_MAP[u]) ? PROJECT_BOOKING_MAP[u] : { count:0, services:new Set() };
     const opp = OPP_DATA[u] || { w:0, n:0, t:0, lw:'', ew:'', wd:[], nd:[] };
 
-    const hasScVms = vms.sc.size > 0;
+    const hasScBookings = bk.count > 0;            // our engagement = Candoo bookings
     const hasCompVms = vms.comp.size > 0;
     const hasWon = (opp.w || 0) > 0;
     const hasAnyOpp = (opp.t || 0) > 0;
-    const hasScEngagement = hasScVms || hasAnyOpp;
+    const hasScEngagement = hasScBookings || hasAnyOpp;
     const isAging = hasWon && opp.lw && opp.lw < aging;
 
     // Primary classification (mutually exclusive across A+/A/B/D/E/F, sum = universe)
     let bucket;
     if (!hasScEngagement && !hasCompVms)        bucket = 'F';
     else if (!hasScEngagement && hasCompVms)    bucket = 'E';
-    else if (hasAnyOpp && !hasWon)              bucket = 'D';
+    else if (hasAnyOpp && !hasWon && !hasScBookings) bucket = 'D';
     else {
-      const scServ = new Set(vms.sc);
+      const scServ = new Set(bk.services);
       (opp.wd || []).forEach(d => scServ.add(canonService(d)));
       if (!hasCompVms) bucket = 'A+';
       else {
@@ -1354,10 +1408,10 @@ function classifyAt(cutoff) {
     if (isAging) out.buckets['C'].push(u);
     out.meta[u] = {
       bucket, building: loc.b, project: loc.p, floor: loc.f,
-      scServices: [...vms.sc].map(canonLabel).join(', ') || (opp.wd||[]).map(d=>canonLabel(canonService(d))).filter((v,i,a)=>a.indexOf(v)===i).join(', '),
+      scServices: [...bk.services].map(canonLabel).filter((v,i,a)=>a.indexOf(v)===i).join(', ') || (opp.wd||[]).map(d=>canonLabel(canonService(d))).filter((v,i,a)=>a.indexOf(v)===i).join(', '),
       compServices: [...vms.comp].map(canonLabel).join(', '),
       compVendors: [...vms.vendors].join('; '),
-      scVisits: vms.scN, compVisits: vms.compN,
+      scVisits: bk.count, compVisits: vms.compN,
       wonOpps: opp.w||0, notWonOpps: opp.n||0, totalOpps: opp.t||0,
       latestWon: opp.lw||'', earliestWon: opp.ew||'',
       wonDepts: (opp.wd||[]).join(', '),
@@ -1642,11 +1696,11 @@ function buildUnitBuckets() {
 ============================================================ */
 function renderKpis() {
   const totalVisits = DATA.length;
-  const scVisits = DATA.filter(r => r.company === MY_COMPANY).length;
+  const scVisits = (typeof dvOurVisitTotal === 'function') ? dvOurVisitTotal() : DATA.filter(r => r.company === MY_COMPANY).length;
   const totalCompanies = new Set(DATA.map(r => r.company).filter(Boolean)).size;
   const totalCompetitors = COMPETITOR_LIST.length;
   const totalUnits = new Set(DATA.map(r => r.unit).filter(Boolean)).size;
-  const shareOfVoice = ((scVisits/totalVisits)*100).toFixed(1);
+  const shareOfVoice = ((scVisits/((scVisits+totalVisits)||1))*100).toFixed(1);
   const top3 = COMPETITOR_LIST.slice(0,3).reduce((s,c)=>s+c.visits,0);
 
   const cards = [
@@ -2971,6 +3025,7 @@ async function goLiveOpps() {
   await acquireOppCrmToken();
   await loadLiveOpportunities();
   startOppAutoRefresh();
+  if (typeof refreshProjectBookings === 'function') refreshProjectBookings();
   if (typeof bootDvTables === 'function') bootDvTables().catch(function (e) { console.warn('DV tables boot failed:', e.message); });
 }
 
@@ -3212,6 +3267,7 @@ window.DV = DV;
   .bk-wk-meta { display:none !important; }
   #bucketGrid2 .bk-row + .bk-row { border-top:1px solid #eef2f7; padding-top:6px; margin-top:5px; }
   #tab2 .section-title { margin-top:6px; margin-bottom:8px; }
+  #tab2 .container { padding-top:8px; }
   #unitMatrixTable td.um-unit { font-size:12px !important; font-weight:700 !important; }
   #unitMatrixTable th, #unitMatrixTable td { border-right:1px solid #eef2f7; }
   #unitMatrixTable th:last-child, #unitMatrixTable td:last-child { border-right:none; }
