@@ -639,6 +639,13 @@
       #unitMatrixTable th.um-unit,#unitMatrixTable td.um-unit{text-align:left;position:sticky;left:0;background:inherit;width:230px;font-weight:600;color:#26415c;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;}
       #unitMatrixTable th.um-unit{background:#fff;color:#5a6b7d;}
       #unitMatrixTable th.um-change,#unitMatrixTable td.um-change{width:120px;}
+      #unitMatrixTable th.um-bk,#unitMatrixTable td.um-bk{width:44px;}
+      #unitMatrixTable th.um-occ,#unitMatrixTable td.um-occ{width:112px;text-align:left;}
+      #unitMatrixTable th.um-names,#unitMatrixTable td.um-names{text-align:left;overflow:hidden;text-overflow:ellipsis;color:#26415c;font-size:11.5px;}
+      #unitMatrixTable .occ-badge{display:inline-block;padding:2px 7px;border-radius:6px;font-size:10.5px;font-weight:700;}
+      #unitMatrixTable .occ-tenant{background:#e8f1fb;color:#1f6fc4;}
+      #unitMatrixTable .occ-owner{background:#eef3f8;color:#1F466B;}
+      #unitMatrixTable .occ-holiday{background:#fdf1df;color:#C97A12;}
       #unitMatrixTable tbody tr{background:#fff;cursor:pointer;}
       #unitMatrixTable tbody tr:nth-child(even){background:#fafbfd;}
       #unitMatrixTable tbody tr.um-moved{background:#FFF7E6;}
@@ -2699,6 +2706,43 @@ function toggleAutoSave() {
   if (typeof toast === 'function') toast('Auto-publish ON. Next visitor upload publishes to everyone and saves the previous buckets as baseline.', 'ok');
 }
 
+/* Occupancy (Contact Location / ssg_occupancytracker) lookup for the matrix.
+   Occupied By: Holiday Home Company -> "Holiday Home"; else Tenant -> "Tenant";
+   else "Owner". Resident name(s): primary contacts within that category. */
+var DV_OCC_INDEX = null, DV_OCC_STAMP = -1;
+function dvBuildOccIndex() {
+  var idx = {};
+  if (window.DV && DV.occtracker && DV.occtracker.rows) {
+    var rows = DV.occtracker.rows;
+    for (var i = 0; i < rows.length; i++) { var r = rows[i]; if (!r.buildingUnit) continue; (idx[r.buildingUnit] = idx[r.buildingUnit] || []).push(r); }
+    DV_OCC_STAMP = rows.length;
+  } else { DV_OCC_STAMP = -1; }
+  DV_OCC_INDEX = idx;
+  return idx;
+}
+function dvOccupancyForUnit(u) {
+  var have = window.DV && DV.occtracker && DV.occtracker.rows;
+  if (!DV_OCC_INDEX || (have && DV.occtracker.rows.length !== DV_OCC_STAMP)) dvBuildOccIndex();
+  var rows = (DV_OCC_INDEX && DV_OCC_INDEX[u]) || [];
+  if (!rows.length) return { occupiedBy: '', names: '' };
+  var hasHoliday = rows.some(function (r) { return r.residentType === 'Holiday Home Company'; });
+  var hasTenant = rows.some(function (r) { return r.residentType === 'Tenant'; });
+  var occ = hasHoliday ? 'Holiday Home' : (hasTenant ? 'Tenant' : 'Owner');
+  function inCat(r) {
+    if (occ === 'Holiday Home') return r.residentType === 'Holiday Home Company';
+    if (occ === 'Tenant') return r.residentType === 'Tenant';
+    return r.residentType !== 'Holiday Home Company' && r.residentType !== 'Tenant';
+  }
+  function isPrimary(r) { return (r.contactType || '').trim().toLowerCase() === 'primary'; }
+  var cat = rows.filter(inCat);
+  var prim = cat.filter(isPrimary);
+  var pick = prim.length ? prim : cat;
+  var seen = {}, names = [];
+  pick.forEach(function (r) { var n = (r.contactName || '').trim(); if (n && !seen[n]) { seen[n] = 1; names.push(n); } });
+  return { occupiedBy: occ, names: names.join(', ') };
+}
+window.addEventListener('dv-tables-updated', function () { try { DV_OCC_STAMP = -1; if (typeof renderUnitMatrix === 'function') renderUnitMatrix(); } catch (e) {} });
+
 function renderUnitMatrix() {
   var tbl = document.getElementById('unitMatrixTable');
   if (!tbl || typeof SEG_META === 'undefined') return;
@@ -2713,7 +2757,8 @@ function renderUnitMatrix() {
   var moversOnly = mEl && mEl.checked;
   var moved = 0, shown = 0;
   var head = '<thead><tr><th class="um-unit">Building / Unit</th>' +
-    COLS.map(function (k) { var d = colDef[k] || {}; return '<th style="color:' + (d.color || '#555') + ';border-bottom:2px solid ' + (d.color || '#ccc') + '">' + k + '</th>'; }).join('') +
+    '<th class="um-occ">Occupied By</th><th class="um-names">Resident Name(s)</th>' +
+    COLS.map(function (k) { var d = colDef[k] || {}; return '<th class="um-bk" style="color:' + (d.color || '#555') + ';border-bottom:2px solid ' + (d.color || '#ccc') + '">' + k + '</th>'; }).join('') +
     '<th class="um-change">Movement</th></tr></thead>';
   var body = '';
   units.forEach(function (u) {
@@ -2726,15 +2771,21 @@ function renderUnitMatrix() {
     shown++;
     var cells = COLS.map(function (k) {
       var d = colDef[k] || {};
-      if (k === cur) return '<td><span class="um-chip" style="background:' + (d.color || '#555') + '">' + k + '</span></td>';
-      if (isMoved && k === base) return '<td><span class="um-chip um-from" style="color:' + (d.color || '#999') + ';border-color:' + (d.color || '#999') + '">' + k + '</span></td>';
-      return '<td><span class="um-empty"></span></td>';
+      if (k === cur) return '<td class="um-bk"><span class="um-chip" style="background:' + (d.color || '#555') + '">' + k + '</span></td>';
+      if (isMoved && k === base) return '<td class="um-bk"><span class="um-chip um-from" style="color:' + (d.color || '#999') + ';border-color:' + (d.color || '#999') + '">' + k + '</span></td>';
+      return '<td class="um-bk"><span class="um-empty"></span></td>';
     }).join('');
     var change = isMoved
       ? '<span class="um-move"><b style="color:' + ((colDef[base] || {}).color || '#777') + '">' + base + '</b><span class="um-arrow">&rarr;</span><b style="color:' + ((colDef[cur] || {}).color || '#333') + '">' + cur + '</b></span>'
       : '<span class="um-nochange">&mdash;</span>';
+    var occ = (typeof dvOccupancyForUnit === 'function') ? dvOccupancyForUnit(u) : { occupiedBy: '', names: '' };
+    var occCls = occ.occupiedBy === 'Tenant' ? 'occ-tenant' : (occ.occupiedBy === 'Holiday Home' ? 'occ-holiday' : (occ.occupiedBy === 'Owner' ? 'occ-owner' : ''));
+    var occCell = occ.occupiedBy ? '<span class="occ-badge ' + occCls + '">' + escHtml(occ.occupiedBy) + '</span>' : '';
     body += '<tr class="umrow' + (isMoved ? ' um-moved' : '') + '" data-u="' + escHtml(u) + '" onclick="openUnitDrill(this.getAttribute(\'data-u\'))">' +
-      '<td class="um-unit">' + escHtml(u) + '</td>' + cells + '<td class="um-change">' + change + '</td></tr>';
+      '<td class="um-unit">' + escHtml(u) + '</td>' +
+      '<td class="um-occ">' + occCell + '</td>' +
+      '<td class="um-names" title="' + escHtml(occ.names) + '">' + escHtml(occ.names) + '</td>' +
+      cells + '<td class="um-change">' + change + '</td></tr>';
   });
   tbl.innerHTML = head + '<tbody>' + body + '</tbody>';
   var meta = document.getElementById('unitMatrixMeta');
