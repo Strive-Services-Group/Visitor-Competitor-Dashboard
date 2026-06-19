@@ -658,7 +658,9 @@
       #unitMatrixTable .um-nochange{color:#cad3dd;}
       .drill-tbl{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:6px;}
       .drill-tbl th,.drill-tbl td{border-bottom:1px solid #eef1f5;padding:5px 8px;text-align:left;}
-      .drill-tbl th{background:#f4f6f9;color:#5a6b7d;font-size:11px;position:sticky;top:0;}
+      .drill-tbl th{background:#f4f6f9;color:#5a6b7d;font-size:11px;position:sticky;top:0;z-index:1;}
+      .drill-scroll{max-height:172px;overflow:auto;border:1px solid #eef1f5;border-radius:6px;margin-bottom:8px;}
+      .drill-scroll .drill-tbl{margin-bottom:0;}
     </style>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
       <div class="section-title" style="margin:0;">📋 Unit Bucket Movement</div>
@@ -2794,36 +2796,74 @@ function renderUnitMatrix() {
   if (meta) meta.innerHTML = '<b>' + shown.toLocaleString() + '</b> shown &middot; <b style="color:#E8A33D">' + moved.toLocaleString() + '</b> moved &middot; ' + units.length.toLocaleString() + ' total';
 }
 
+/* Helpers for the unit drill-through (4 tables). */
+function dvRowsForUnit(store, u) {
+  if (!(window.DV && DV[store] && DV[store].rows)) return [];
+  return DV[store].rows.filter(function (r) { return r.buildingUnit === u; });
+}
+function dvIsOurCompany(name) {
+  var n = (name || '').trim().toLowerCase();
+  return n.indexOf('candoo') === 0 || n.indexOf('s & c') === 0 || n.indexOf('s&c') === 0 || n.indexOf('strive') === 0;
+}
+function dvIsMeetingIncident(r) {
+  var c = (r.category || '').trim().toLowerCase(), s = (r.subcategory || '').trim().toLowerCase();
+  return c === 'residence meeting' || s === 'residence meetings';
+}
+function dvFmtDT(iso) {
+  if (!iso) return '';
+  var d = new Date(iso); if (isNaN(d.getTime())) return iso;
+  var z = new Date(d.getTime() + 4 * 3600000); // Dubai time (UTC+4)
+  return z.toISOString().slice(0, 16).replace('T', ' ');
+}
+function dvDrillSection(title, count, head, rows) {
+  return '<h3 style="margin:14px 0 6px;font-size:14px;">' + title + ' (' + count + ')</h3>' +
+    '<div class="drill-scroll"><table class="drill-tbl"><thead><tr>' + head + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+}
+
 function openUnitDrill(u) {
   if (!u || typeof openModal !== 'function') return;
   var m = (typeof SEG_META !== 'undefined' && SEG_META[u]) ? SEG_META[u] : {};
   var cur = m.bucket || '-';
   var base = (typeof OPP_BASELINE_UNITS !== 'undefined') ? OPP_BASELINE_UNITS[u] : undefined;
   var movedHtml = (base && base !== cur) ? '<span style="font-weight:700;color:#145A95">' + base + ' &rarr; ' + cur + '</span>' : 'No change (' + cur + ')';
-  var visits = (typeof DATA !== 'undefined' ? DATA : []).filter(function (r) { return r.unit === u; })
+  var occ = (typeof dvOccupancyForUnit === 'function') ? dvOccupancyForUnit(u) : { occupiedBy: '', names: '' };
+
+  // 1) Visit History (VMS) — external visitors only; exclude our own companies.
+  var visits = (typeof DATA !== 'undefined' ? DATA : []).filter(function (r) { return r.unit === u && !dvIsOurCompany(r.company); })
     .sort(function (a, b) { return (b.date || '').localeCompare(a.date || ''); });
   var vrows = visits.map(function (r) {
-    var mine = (typeof MY_COMPANY !== 'undefined' && r.company === MY_COMPANY);
-    return '<tr><td>' + escHtml(r.date || '') + '</td><td>' + escHtml(r.time || '') + '</td><td style="' + (mine ? 'color:#2E8B57;font-weight:600' : '') + '">' + escHtml(r.company || '') + '</td><td>' + escHtml(r.purpose || '') + '</td><td>' + escHtml(r.gate || '') + '</td></tr>';
+    return '<tr><td>' + escHtml(r.date || '') + '</td><td>' + escHtml(r.time || '') + '</td><td>' + escHtml(r.company || '') + '</td><td>' + escHtml(r.purpose || '') + '</td><td>' + escHtml(r.gate || '') + '</td></tr>';
   }).join('') || '<tr><td colspan="5" style="color:#9aa7b5;">No visits recorded</td></tr>';
-  var opps = (typeof OPP_RAW_BY_UNIT !== 'undefined' ? (OPP_RAW_BY_UNIT[u] || []) : []).slice()
-    .sort(function (a, b) { return (b.date || '').localeCompare(a.date || ''); });
-  var orows = opps.map(function (o) {
-    return '<tr><td>' + escHtml(o.date || '') + '</td><td>' + escHtml(o.dept || '') + '</td><td>' + escHtml(o.gate || '') + '</td><td>' + (o.won ? '<span style="color:#2E8B57;font-weight:700">Won</span>' : '<span style="color:#C0392B">No</span>') + '</td></tr>';
-  }).join('') || '<tr><td colspan="4" style="color:#9aa7b5;">No opportunities</td></tr>';
+
+  // 2) Candoo Home Services Visits (bookings) — date = planned start, purpose = department.
+  var bookings = dvRowsForUnit('booking', u).sort(function (a, b) { return (b.plannedStart || b.created || '').localeCompare(a.plannedStart || a.created || ''); });
+  var brows = bookings.map(function (r) {
+    return '<tr><td>' + escHtml(dvFmtDT(r.plannedStart)) + '</td><td>' + escHtml(r.resource || '') + '</td><td>' + escHtml(r.woDepartment || '') + '</td><td>' + escHtml(r.bookingStatus || '') + '</td></tr>';
+  }).join('') || '<tr><td colspan="4" style="color:#9aa7b5;">No Candoo visits</td></tr>';
+
+  // 3 & 4) Incidents for this unit, split by the meeting rule.
+  var incs = dvRowsForUnit('incident', u).sort(function (a, b) { return (b.created || '').localeCompare(a.created || ''); });
+  var meetings = incs.filter(dvIsMeetingIncident);
+  var others = incs.filter(function (r) { return !dvIsMeetingIncident(r); });
+  function incRow(r) {
+    return '<tr><td>' + escHtml(dvFmtDT(r.created)) + '</td><td>' + escHtml(r.caseNumber || '') + '</td><td>' + escHtml(r.title || '') + '</td><td>' + escHtml(r.category || '') + '</td><td>' + escHtml(r.subcategory || '') + '</td><td>' + escHtml(r.status || '') + '</td></tr>';
+  }
+  var mrows = meetings.map(incRow).join('') || '<tr><td colspan="6" style="color:#9aa7b5;">No records</td></tr>';
+  var crows = others.map(incRow).join('') || '<tr><td colspan="6" style="color:#9aa7b5;">No records</td></tr>';
+
+  var incHead = '<th>Date</th><th>Case #</th><th>Title</th><th>Category</th><th>Sub-category</th><th>Status</th>';
   var html =
-    '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-size:13px;">' +
+    '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px;font-size:13px;">' +
       '<div><strong>Building:</strong> ' + escHtml(m.building || '') + '</div>' +
       '<div><strong>Current bucket:</strong> ' + escHtml(cur) + '</div>' +
       '<div><strong>Movement:</strong> ' + movedHtml + '</div>' +
-      '<div><strong>S&amp;C visits:</strong> ' + (m.scVisits || 0) + '</div>' +
-      '<div><strong>Competitor visits:</strong> ' + (m.compVisits || 0) + '</div>' +
-      '<div><strong>Opportunities:</strong> ' + (m.totalOpps || 0) + ' (' + (m.wonOpps || 0) + ' won)</div>' +
+      (occ.occupiedBy ? '<div><strong>Occupied by:</strong> ' + escHtml(occ.occupiedBy) + '</div>' : '') +
+      (occ.names ? '<div><strong>Resident:</strong> ' + escHtml(occ.names) + '</div>' : '') +
     '</div>' +
-    '<h3 style="margin:12px 0 6px;font-size:14px;">Visit history (' + visits.length + ')</h3>' +
-    '<table class="drill-tbl"><thead><tr><th>Date</th><th>Time</th><th>Company</th><th>Purpose</th><th>Check-in Gate</th></tr></thead><tbody>' + vrows + '</tbody></table>' +
-    '<h3 style="margin:16px 0 6px;font-size:14px;">Opportunity history (' + opps.length + ')</h3>' +
-    '<table class="drill-tbl"><thead><tr><th>Created</th><th>Department</th><th>Quote Gate</th><th>Won?</th></tr></thead><tbody>' + orows + '</tbody></table>';
+    dvDrillSection('Visit History', visits.length, '<th>Date</th><th>Time</th><th>Company</th><th>Purpose</th><th>Check-in Gate</th>', vrows) +
+    dvDrillSection('Candoo Home Services Visits', bookings.length, '<th>Date (Planned)</th><th>Resource</th><th>Purpose</th><th>Status</th>', brows) +
+    dvDrillSection('Meetings, Feedback, &amp; Complaint', meetings.length, incHead, mrows) +
+    dvDrillSection('Other Cases', others.length, incHead, crows);
   openModal('Unit · ' + u, html);
 }
 
@@ -2932,7 +2972,8 @@ const DV_TABLES = {
       category: r['_ssg_category_value' + DV_F] || '',
       project: r['_ssg_project_value' + DV_F] || '',
       subcategory: r['_ssg_subcategory_value' + DV_F] || '',
-      unit: r['_ssg_unit_value' + DV_F] || ''
+      unit: r['_ssg_unit_value' + DV_F] || '',
+      buildingUnit: dvBU(r['_ssg_building_value' + DV_F] || '', r['_ssg_unit_value' + DV_F] || '')
     }; }
   },
   contact: {
