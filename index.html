@@ -2892,7 +2892,16 @@ function ssgTechAppUrl(unit) {
   var unitId = (typeof DV_UNITID_BY_KEY !== 'undefined' && DV_UNITID_BY_KEY) ? DV_UNITID_BY_KEY[unit] : '';
   var q = '';
   if (unitId) q += '&unitid=' + encodeURIComponent(unitId);
-  if (unit) q += '&unit=' + encodeURIComponent(unit);
+  if (unit) {
+    q += '&unit=' + encodeURIComponent(unit);
+    var us = String(unit), sep = us.indexOf('_');
+    var building = sep >= 0 ? us.slice(0, sep) : us;
+    var unitname = sep >= 0 ? us.slice(sep + 1) : '';
+    var dash = unitname.indexOf('-');
+    var unitno = dash >= 0 ? unitname.slice(dash + 1) : unitname; // "APARTMENT-1001" -> "1001"
+    if (building) q += '&building=' + encodeURIComponent(building);
+    if (unitno) q += '&unitno=' + encodeURIComponent(unitno);
+  }
   return SSG_TECH_APP_URL + q;
 }
 function dvDrillSection(title, count, head, rows) {
