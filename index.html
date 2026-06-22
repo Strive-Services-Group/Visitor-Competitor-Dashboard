@@ -2855,7 +2855,7 @@ function renderUnitMatrix() {
     body += '<tr class="umrow' + (isMoved ? ' um-moved' : '') + '" data-u="' + escHtml(u) + '" onclick="openUnitDrill(this.getAttribute(\'data-u\'))">' +
       '<td class="um-unit">' + escHtml(u) + '</td>' +
       '<td class="um-occ">' + occCell + '</td>' +
-      '<td class="um-names" title="' + escHtml(occ.names) + '">' + escHtml(occ.names) + '</td>' +
+      '<td class="um-names" title="' + escHtml(occ.names) + '">' + (occ.names ? '<a href="' + ssgTechAppUrl(u) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Open in SSG Technician app">' + escHtml(occ.names) + '</a>' : '') + '</td>' +
       cells + '<td class="um-change">' + change + '</td></tr>';
   });
   tbl.innerHTML = head + '<tbody>' + body + '</tbody>';
@@ -2882,6 +2882,13 @@ function dvFmtDT(iso) {
   var z = new Date(d.getTime() + 4 * 3600000); // Dubai time (UTC+4)
   return z.toISOString().slice(0, 16).replace('T', ' ');
 }
+/* Deep links: Case # -> Dynamics 365 incident record; Resident -> SSG Technician Power App. */
+function d365CaseUrl(id) {
+  var org = OPP_CRM_API_BASE.replace('/api/data/v9.2', '');
+  return org + '/main.aspx?pagetype=entityrecord&etn=incident&id=' + encodeURIComponent(id);
+}
+var SSG_TECH_APP_URL = 'https://apps.powerapps.com/play/e/4a8985eb-7342-e60f-9fa7-8a1538693e43/a/56e328d7-8c2a-44bf-8697-fad5b40fe4a1?tenantId=f9454680-0e71-4aca-8616-3a77bda74f7e';
+function ssgTechAppUrl(unit) { return SSG_TECH_APP_URL + (unit ? '&unit=' + encodeURIComponent(unit) : ''); }
 function dvDrillSection(title, count, head, rows) {
   return '<h3 style="margin:14px 0 6px;font-size:14px;">' + title + ' (' + count + ')</h3>' +
     '<div class="drill-scroll"><table class="drill-tbl"><thead><tr>' + head + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
@@ -2911,7 +2918,7 @@ function openUnitDrill(u) {
       '<div><strong>Current bucket:</strong> ' + escHtml(cur) + '</div>' +
       '<div><strong>Movement:</strong> ' + movedHtml + '</div>' +
       (occ.occupiedBy ? '<div><strong>Occupied by:</strong> ' + escHtml(occ.occupiedBy) + '</div>' : '') +
-      (occ.names ? '<div><strong>Resident:</strong> ' + escHtml(occ.names) + '</div>' : '') +
+      (occ.names ? '<div><strong>Resident:</strong> <a href="' + ssgTechAppUrl(u) + '" target="_blank" rel="noopener" title="Open in SSG Technician app">' + escHtml(occ.names) + '</a></div>' : '') +
     '</div>' +
     dvDrillSection('Visit History', visits.length, '<th>Date</th><th>Time</th><th>Company</th><th>Purpose</th><th>Check-in Gate</th>', vrows) +
     dvDrillSectionId('Candoo Home Services Visits', 'drillCandoo', '<th>Date (Planned)</th><th>Resource</th><th>Work Order Title</th><th>Purpose</th><th>Status</th>', loading(5)) +
@@ -2931,14 +2938,17 @@ function dvSetSection(id, rows, count, cols) {
   var c = document.getElementById(id + 'Cnt'); if (c) c.textContent = count;
 }
 function dvIncRowHtml(r) {
-  return '<tr><td>' + escHtml(dvFmtDT(r.created)) + '</td><td>' + escHtml(r.caseNumber || '') + '</td><td>' + escHtml(r.title || '') + '</td><td>' + escHtml(r.category || '') + '</td><td>' + escHtml(r.subcategory || '') + '</td><td>' + escHtml(r.status || '') + '</td></tr>';
+  var caseCell = r.caseNumber
+    ? (r.id ? '<a href="' + d365CaseUrl(r.id) + '" target="_blank" rel="noopener" title="Open case in Dynamics 365">' + escHtml(r.caseNumber) + '</a>' : escHtml(r.caseNumber))
+    : '';
+  return '<tr><td>' + escHtml(dvFmtDT(r.created)) + '</td><td>' + caseCell + '</td><td>' + escHtml(r.title || '') + '</td><td>' + escHtml(r.category || '') + '</td><td>' + escHtml(r.subcategory || '') + '</td><td>' + escHtml(r.status || '') + '</td></tr>';
 }
 async function dvDrillFetchUnit(unitId) {
   var F = '@OData.Community.Display.V1.FormattedValue';
-  var incUrl = OPP_CRM_API_BASE + '/incidents?$select=title,statuscode,ssg_casenumber,_ssg_category_value,_ssg_subcategory_value,createdon&$filter=' + encodeURIComponent('_ssg_unit_value eq ' + unitId) + '&$orderby=createdon desc';
+  var incUrl = OPP_CRM_API_BASE + '/incidents?$select=incidentid,title,statuscode,ssg_casenumber,_ssg_category_value,_ssg_subcategory_value,createdon&$filter=' + encodeURIComponent('_ssg_unit_value eq ' + unitId) + '&$orderby=createdon desc';
   var bkUrl = OPP_CRM_API_BASE + '/bookableresourcebookings?$select=ssg_plannedstartdate,_resource_value,_bookingstatus_value&$expand=msdyn_workorder($select=_ssg_department_value,ssg_title)&$filter=' + encodeURIComponent('msdyn_workorder/_ssg_division_value eq ' + DV_DIVISION_CANDOO + ' and msdyn_workorder/_ssg_unit_value eq ' + unitId) + '&$orderby=ssg_plannedstartdate desc';
   var r = await Promise.all([oppCrmGet(incUrl), oppCrmGet(bkUrl)]);
-  var incs = (r[0].value || []).map(function (x) { return { created: x.createdon, caseNumber: x.ssg_casenumber, title: x.title, category: x['_ssg_category_value' + F] || '', subcategory: x['_ssg_subcategory_value' + F] || '', status: x['statuscode' + F] || '' }; });
+  var incs = (r[0].value || []).map(function (x) { return { id: x.incidentid, created: x.createdon, caseNumber: x.ssg_casenumber, title: x.title, category: x['_ssg_category_value' + F] || '', subcategory: x['_ssg_subcategory_value' + F] || '', status: x['statuscode' + F] || '' }; });
   var bookings = (r[1].value || []).filter(function (x) {
     var st = (x['_bookingstatus_value' + F] || '').toLowerCase();
     var res = (x['_resource_value' + F] || '').toLowerCase();
@@ -3281,6 +3291,10 @@ window.DV = DV;
   #tab2 .container { padding-top:8px; }
   .topfreeze { position:sticky; top:0; z-index:200; }
   .topfreeze .tab-bar { position:static; }
+  .drill-tbl a { color:#145A95; text-decoration:none; font-weight:600; }
+  .drill-tbl a:hover { text-decoration:underline; }
+  #unitMatrixTable .um-names a { color:#145A95; text-decoration:none; }
+  #unitMatrixTable .um-names a:hover { text-decoration:underline; }
   #unitMatrixTable td.um-unit { font-size:12px !important; font-weight:700 !important; }
   #unitMatrixTable th, #unitMatrixTable td { border-right:1px solid #eef2f7; }
   #unitMatrixTable th:last-child, #unitMatrixTable td:last-child { border-right:none; }
