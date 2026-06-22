@@ -2888,7 +2888,13 @@ function d365CaseUrl(id) {
   return org + '/main.aspx?pagetype=entityrecord&etn=incident&id=' + encodeURIComponent(id);
 }
 var SSG_TECH_APP_URL = 'https://apps.powerapps.com/play/e/4a8985eb-7342-e60f-9fa7-8a1538693e43/a/56e328d7-8c2a-44bf-8697-fad5b40fe4a1?tenantId=f9454680-0e71-4aca-8616-3a77bda74f7e';
-function ssgTechAppUrl(unit) { return SSG_TECH_APP_URL + (unit ? '&unit=' + encodeURIComponent(unit) : ''); }
+function ssgTechAppUrl(unit) {
+  var unitId = (typeof DV_UNITID_BY_KEY !== 'undefined' && DV_UNITID_BY_KEY) ? DV_UNITID_BY_KEY[unit] : '';
+  var q = '';
+  if (unitId) q += '&unitid=' + encodeURIComponent(unitId);
+  if (unit) q += '&unit=' + encodeURIComponent(unit);
+  return SSG_TECH_APP_URL + q;
+}
 function dvDrillSection(title, count, head, rows) {
   return '<h3 style="margin:14px 0 6px;font-size:14px;">' + title + ' (' + count + ')</h3>' +
     '<div class="drill-scroll"><table class="drill-tbl"><thead><tr>' + head + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
