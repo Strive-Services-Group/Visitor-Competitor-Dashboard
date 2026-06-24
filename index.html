@@ -634,6 +634,9 @@
   </div>
 
   <!-- 7 BUCKET CARDS IN ONE ROW -->
+  <div id="bktLoading" style="display:none;text-align:center;padding:12px;color:#145A95;font-size:13px;font-weight:600;">
+    <span style="display:inline-block;width:18px;height:18px;border:3px solid #cfe0ee;border-top-color:#145A95;border-radius:50%;animation:bktspin .8s linear infinite;vertical-align:middle;margin-right:8px;"></span>Loading live bucket data…
+  </div>
   <div id="bucketGrid2" class="bucket-row"></div>
 
   <div id="unitMatrixWrap" class="card">
@@ -982,9 +985,11 @@ async function fetchProjectBookings(project) {
   } catch (e) { console.warn('project bookings failed:', e.message); }
   finally { _projBookingLoading = ''; PROJECT_BOOKING_LOADED[project] = true; }
 }
+function showBktLoading(on) { var el = document.getElementById('bktLoading'); if (el) el.style.display = on ? 'block' : 'none'; }
 function refreshProjectBookings() {
   var p = SELECTED_PROJECT;
-  return fetchProjectBookings(p).then(function () { if (SELECTED_PROJECT === p) recomputeAll(); });
+  showBktLoading(true);
+  return fetchProjectBookings(p).then(function () { if (SELECTED_PROJECT === p) recomputeAll(); showBktLoading(false); }).catch(function () { showBktLoading(false); });
 }
 
 /* ============================================================
@@ -2667,17 +2672,27 @@ var OPP_RAW_BY_UNIT = {};
    resets each week — instead of drifting from a stale committed baseline. */
 function getWeekBaseline() {
   var proj = (typeof SELECTED_PROJECT !== 'undefined' && SELECTED_PROJECT) ? SELECTED_PROJECT : 'ALL';
-  var wk = (typeof getISOWeek === 'function') ? getISOWeek(new Date()) : '';
-  var key = 'VBD_WKBASE_' + proj + '_' + wk;
+  var wkNow = (typeof getISOWeek === 'function') ? getISOWeek(new Date()) : '';
+  var wkPrev = (typeof getISOWeek === 'function') ? getISOWeek(new Date(Date.now() - 7 * 864e5)) : '';
+  var ready = (typeof PROJECT_BOOKING_LOADED !== 'undefined') && PROJECT_BOOKING_LOADED[proj] && typeof SEG_META !== 'undefined' && Object.keys(SEG_META).length;
+  // Continuously save THIS week's per-unit state (latest wins) -> becomes next week's baseline.
+  if (ready) {
+    var cur = {}; for (var u in SEG_META) cur[u] = SEG_META[u].bucket;
+    try { localStorage.setItem('VBD_UNITSNAP_' + proj + '_' + wkNow, JSON.stringify(cur)); } catch (e) {}
+  }
+  // Baseline = last week's final per-unit snapshot (matches the cards' week-over-week view).
+  var prev = null; try { prev = JSON.parse(localStorage.getItem('VBD_UNITSNAP_' + proj + '_' + wkPrev) || 'null'); } catch (e) {}
+  if (prev && Object.keys(prev).length) return prev;
+  // First week using this (no prior snapshot): lock this week's start state, reuse all week.
+  var key = 'VBD_WKBASE_' + proj + '_' + wkNow;
   var b = null; try { b = JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) {}
   if (b && Object.keys(b).length) return b;
-  var ready = (typeof PROJECT_BOOKING_LOADED !== 'undefined') && PROJECT_BOOKING_LOADED[proj];
-  if (ready && typeof SEG_META !== 'undefined' && Object.keys(SEG_META).length) {
-    var cur = {}; for (var u in SEG_META) cur[u] = SEG_META[u].bucket;
-    try { localStorage.setItem(key, JSON.stringify(cur)); } catch (e) {}
-    return cur;
+  if (ready) {
+    var cur2 = {}; for (var u2 in SEG_META) cur2[u2] = SEG_META[u2].bucket;
+    try { localStorage.setItem(key, JSON.stringify(cur2)); } catch (e) {}
+    return cur2;
   }
-  return b || {};
+  return {};
 }
 function loadCentralSnapshots() {
   // Shared bucket history committed to the repo: weekly counts (Last Week / Last Two Week)
@@ -2894,7 +2909,9 @@ function renderUnitMatrix() {
   });
   tbl.innerHTML = head + '<tbody>' + body + '</tbody>';
   var meta = document.getElementById('unitMatrixMeta');
-  if (meta) meta.innerHTML = 'Total Unit - <b>' + units.length.toLocaleString() + '</b> &middot; <b style="color:#E8A33D">' + moved.toLocaleString() + '</b> Unit Moved current Week';
+  if (meta) meta.innerHTML = 'Total Unit - <b>' + units.length.toLocaleString() + '</b>' +
+    '<span style="display:inline-block;width:26px;"></span>' +
+    '<b style="color:#E8A33D">' + moved.toLocaleString() + '</b> Unit Moved <span style="color:#5a6b7d;">(Current Week)</span>';
 }
 
 /* Helpers for the unit drill-through (4 tables). */
@@ -3338,6 +3355,7 @@ window.DV = DV;
   #bucketGrid2 .bk-row + .bk-row { border-top:1px solid #eef2f7; padding-top:6px; margin-top:5px; }
   #tab2 .section-title { margin-top:6px; margin-bottom:8px; }
   #tab2 .container { padding-top:8px; }
+  @keyframes bktspin { to { transform: rotate(360deg); } }
   .topfreeze { position:sticky; top:0; z-index:200; }
   .topfreeze .tab-bar { position:static; }
   .drill-tbl a { color:#145A95; text-decoration:none; font-weight:600; }
