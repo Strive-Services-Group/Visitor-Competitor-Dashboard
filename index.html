@@ -932,6 +932,7 @@ async function fetchProjectOpps(project) {
    Department is canonicalised (canonService) to compare same/diff service. */
 var PROJECT_BOOKING_MAP = {};      // buildingUnit -> { count, services:Set }
 var PROJECT_BOOKING_CACHE = {};    // project name -> map
+var PROJECT_BOOKING_LOADED = {};   // project name -> true once a fetch finished
 var _projBookingLoading = '';
 function dvOurVisitTotal() { var t = 0; for (var k in PROJECT_BOOKING_MAP) t += PROJECT_BOOKING_MAP[k].count; return t; }
 async function fetchProjectBookings(project) {
@@ -941,9 +942,17 @@ async function fetchProjectBookings(project) {
   _projBookingLoading = project;
   try {
     var F = '@OData.Community.Display.V1.FormattedValue';
-    var pj = await oppCrmGet(OPP_CRM_API_BASE + "/msdyn_functionallocations?$select=msdyn_functionallocationid&$filter=" + encodeURIComponent("msdyn_name eq '" + project.replace(/'/g, "''") + "'") + "&$top=1");
+    var safe = project.replace(/'/g, "''");
+    var pj = await oppCrmGet(OPP_CRM_API_BASE + "/msdyn_functionallocations?$select=msdyn_functionallocationid,msdyn_name&$filter=" + encodeURIComponent("msdyn_name eq '" + safe + "'") + "&$top=1");
     var pid = (pj.value && pj.value[0]) ? pj.value[0].msdyn_functionallocationid : null;
-    if (!pid) { PROJECT_BOOKING_MAP = {}; return; }
+    if (!pid) {
+      // fallback: starts-with (handles e.g. "MAG 318 RESIDENCE" vs "MAG 318")
+      try {
+        var pj2 = await oppCrmGet(OPP_CRM_API_BASE + "/msdyn_functionallocations?$select=msdyn_functionallocationid,msdyn_name&$filter=" + encodeURIComponent("startswith(msdyn_name,'" + safe + "')") + "&$top=5");
+        if (pj2.value && pj2.value.length) { pid = pj2.value[0].msdyn_functionallocationid; console.log('[DV] project matched by startswith:', project, '->', pj2.value[0].msdyn_name); }
+      } catch (e2) {}
+    }
+    if (!pid) { console.warn('[DV] NO functional location found for project:', project); PROJECT_BOOKING_MAP = {}; return; }
     var url = OPP_CRM_API_BASE + '/bookableresourcebookings?$select=_resource_value,_bookingstatus_value&$expand=msdyn_workorder($select=_ssg_building_value,_ssg_unit_value,_ssg_department_value)&$filter=' + encodeURIComponent('msdyn_workorder/_ssg_division_value eq ' + DV_DIVISION_CANDOO + ' and msdyn_workorder/_ssg_project_value eq ' + pid);
     var map = {}, guard = 0;
     while (url && guard < 60) {
@@ -966,8 +975,9 @@ async function fetchProjectBookings(project) {
     }
     PROJECT_BOOKING_CACHE[project] = map;
     PROJECT_BOOKING_MAP = map;
+    console.log('[DV] project bookings:', project, 'units with our service:', Object.keys(map).length, 'sample key:', Object.keys(map)[0]);
   } catch (e) { console.warn('project bookings failed:', e.message); }
-  finally { _projBookingLoading = ''; }
+  finally { _projBookingLoading = ''; PROJECT_BOOKING_LOADED[project] = true; }
 }
 function refreshProjectBookings() {
   var p = SELECTED_PROJECT;
@@ -2648,6 +2658,24 @@ function loadCentralData() {
 var OPP_CENTRAL_SNAPS = {};
 var OPP_BASELINE_UNITS = {};
 var OPP_RAW_BY_UNIT = {};
+/* Per-project, week-locked baseline for the Unit Bucket Movement table:
+   locks the per-unit buckets once (per ISO week + project, after this project's
+   bookings have loaded) so "moved" reflects movement WITHIN the current week and
+   resets each week — instead of drifting from a stale committed baseline. */
+function getWeekBaseline() {
+  var proj = (typeof SELECTED_PROJECT !== 'undefined' && SELECTED_PROJECT) ? SELECTED_PROJECT : 'ALL';
+  var wk = (typeof getISOWeek === 'function') ? getISOWeek(new Date()) : '';
+  var key = 'VBD_WKBASE_' + proj + '_' + wk;
+  var b = null; try { b = JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) {}
+  if (b && Object.keys(b).length) return b;
+  var ready = (typeof PROJECT_BOOKING_LOADED !== 'undefined') && PROJECT_BOOKING_LOADED[proj];
+  if (ready && typeof SEG_META !== 'undefined' && Object.keys(SEG_META).length) {
+    var cur = {}; for (var u in SEG_META) cur[u] = SEG_META[u].bucket;
+    try { localStorage.setItem(key, JSON.stringify(cur)); } catch (e) {}
+    return cur;
+  }
+  return b || {};
+}
 function loadCentralSnapshots() {
   // Shared bucket history committed to the repo: weekly counts (Last Week / Last Two Week)
   // plus a per-unit baseline (_units) used for day-over-day movement arrows. Same for everyone.
@@ -2829,6 +2857,7 @@ function renderUnitMatrix() {
   var mEl = document.getElementById('unitMatrixMoversOnly');
   var moversOnly = mEl && mEl.checked;
   var moved = 0, shown = 0;
+  var WKBASE = (typeof getWeekBaseline === 'function') ? getWeekBaseline() : (OPP_BASELINE_UNITS || {});
   var head = '<thead><tr><th class="um-unit">Building / Unit</th>' +
     '<th class="um-occ">Occupied By</th><th class="um-names">Resident Name(s)</th>' +
     COLS.map(function (k) { var d = colDef[k] || {}; return '<th class="um-bk" style="color:' + (d.color || '#555') + ';border-bottom:2px solid ' + (d.color || '#ccc') + '">' + k + '</th>'; }).join('') +
@@ -2836,7 +2865,7 @@ function renderUnitMatrix() {
   var body = '';
   units.forEach(function (u) {
     var cur = SEG_META[u].bucket;
-    var base = OPP_BASELINE_UNITS ? OPP_BASELINE_UNITS[u] : undefined;
+    var base = WKBASE[u];
     var isMoved = base && base !== cur && COLS.indexOf(base) >= 0 && COLS.indexOf(cur) >= 0;
     if (isMoved) moved++;
     if (moversOnly && !isMoved) return;
@@ -2862,7 +2891,7 @@ function renderUnitMatrix() {
   });
   tbl.innerHTML = head + '<tbody>' + body + '</tbody>';
   var meta = document.getElementById('unitMatrixMeta');
-  if (meta) meta.innerHTML = '<b>' + shown.toLocaleString() + '</b> shown &middot; <b style="color:#E8A33D">' + moved.toLocaleString() + '</b> moved &middot; ' + units.length.toLocaleString() + ' total';
+  if (meta) meta.innerHTML = 'Total Unit - <b>' + units.length.toLocaleString() + '</b> &middot; <b style="color:#E8A33D">' + moved.toLocaleString() + '</b> Unit Moved current Week';
 }
 
 /* Helpers for the unit drill-through (4 tables). */
@@ -2915,7 +2944,7 @@ function openUnitDrill(u) {
   if (!u || typeof openModal !== 'function') return;
   var m = (typeof SEG_META !== 'undefined' && SEG_META[u]) ? SEG_META[u] : {};
   var cur = m.bucket || '-';
-  var base = (typeof OPP_BASELINE_UNITS !== 'undefined') ? OPP_BASELINE_UNITS[u] : undefined;
+  var base = (typeof getWeekBaseline === 'function') ? getWeekBaseline()[u] : ((typeof OPP_BASELINE_UNITS !== 'undefined') ? OPP_BASELINE_UNITS[u] : undefined);
   var movedHtml = (base && base !== cur) ? '<span style="font-weight:700;color:#145A95">' + base + ' &rarr; ' + cur + '</span>' : 'No change (' + cur + ')';
   var occ = (typeof dvOccupancyForUnit === 'function') ? dvOccupancyForUnit(u) : { occupiedBy: '', names: '' };
 
