@@ -943,17 +943,20 @@ async function fetchProjectBookings(project) {
   try {
     var F = '@OData.Community.Display.V1.FormattedValue';
     var safe = project.replace(/'/g, "''");
-    var pj = await oppCrmGet(OPP_CRM_API_BASE + "/msdyn_functionallocations?$select=msdyn_functionallocationid,msdyn_name&$filter=" + encodeURIComponent("msdyn_name eq '" + safe + "'") + "&$top=1");
-    var pid = (pj.value && pj.value[0]) ? pj.value[0].msdyn_functionallocationid : null;
-    if (!pid) {
+    var fl = await oppCrmGet(OPP_CRM_API_BASE + "/msdyn_functionallocations?$select=msdyn_functionallocationid,msdyn_name&$filter=" + encodeURIComponent("msdyn_name eq '" + safe + "'") + "&$top=25");
+    var ids = (fl.value || []).map(function (x) { return x.msdyn_functionallocationid; });
+    if (!ids.length) {
       // fallback: starts-with (handles e.g. "MAG 318 RESIDENCE" vs "MAG 318")
       try {
-        var pj2 = await oppCrmGet(OPP_CRM_API_BASE + "/msdyn_functionallocations?$select=msdyn_functionallocationid,msdyn_name&$filter=" + encodeURIComponent("startswith(msdyn_name,'" + safe + "')") + "&$top=5");
-        if (pj2.value && pj2.value.length) { pid = pj2.value[0].msdyn_functionallocationid; console.log('[DV] project matched by startswith:', project, '->', pj2.value[0].msdyn_name); }
+        var fl2 = await oppCrmGet(OPP_CRM_API_BASE + "/msdyn_functionallocations?$select=msdyn_functionallocationid,msdyn_name&$filter=" + encodeURIComponent("startswith(msdyn_name,'" + safe + "')") + "&$top=25");
+        ids = (fl2.value || []).map(function (x) { return x.msdyn_functionallocationid; });
+        if (ids.length) console.log('[DV] project matched by startswith:', project, '->', (fl2.value || []).map(function (x) { return x.msdyn_name; }));
       } catch (e2) {}
     }
-    if (!pid) { console.warn('[DV] NO functional location found for project:', project); PROJECT_BOOKING_MAP = {}; return; }
-    var url = OPP_CRM_API_BASE + '/bookableresourcebookings?$select=_resource_value,_bookingstatus_value&$expand=msdyn_workorder($select=_ssg_building_value,_ssg_unit_value,_ssg_department_value)&$filter=' + encodeURIComponent('msdyn_workorder/_ssg_division_value eq ' + DV_DIVISION_CANDOO + ' and msdyn_workorder/_ssg_project_value eq ' + pid);
+    if (!ids.length) { console.warn('[DV] NO functional location found for project:', project); PROJECT_BOOKING_MAP = {}; return; }
+    // OR across ALL functional locations with this name (some projects have more than one)
+    var projFilter = '(' + ids.map(function (g) { return 'msdyn_workorder/_ssg_project_value eq ' + g; }).join(' or ') + ')';
+    var url = OPP_CRM_API_BASE + '/bookableresourcebookings?$select=_resource_value,_bookingstatus_value&$expand=msdyn_workorder($select=_ssg_building_value,_ssg_unit_value,_ssg_department_value)&$filter=' + encodeURIComponent('msdyn_workorder/_ssg_division_value eq ' + DV_DIVISION_CANDOO + ' and ' + projFilter);
     var map = {}, guard = 0;
     while (url && guard < 60) {
       var j = await oppCrmGet(url);
