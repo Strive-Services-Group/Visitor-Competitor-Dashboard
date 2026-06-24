@@ -957,31 +957,78 @@ async function fetchProjectBookings(project) {
       } catch (e2) {}
     }
     if (!ids.length) { console.warn('[DV] NO functional location found for project:', project); PROJECT_BOOKING_MAP = {}; return; }
-    // OR across ALL functional locations with this name (some projects have more than one)
-    var projFilter = '(' + ids.map(function (g) { return 'msdyn_workorder/_ssg_project_value eq ' + g; }).join(' or ') + ')';
-    var url = OPP_CRM_API_BASE + '/bookableresourcebookings?$select=_resource_value,_bookingstatus_value&$expand=msdyn_workorder($select=_ssg_building_value,_ssg_unit_value,_ssg_department_value)&$filter=' + encodeURIComponent('msdyn_workorder/_ssg_division_value eq ' + DV_DIVISION_CANDOO + ' and ' + projFilter);
-    var map = {}, guard = 0;
-    while (url && guard < 60) {
-      var j = await oppCrmGet(url);
-      var arr = j.value || [];
-      for (var i = 0; i < arr.length; i++) {
-        var x = arr[i], w = x.msdyn_workorder || {};
-        var st = (x['_bookingstatus_value' + F] || '').toLowerCase();
-        if (st.indexOf('cancel') >= 0) continue; // drop canceled bookings
-        var res = (x['_resource_value' + F] || '').toLowerCase();
-        if (res.indexOf('team leader') >= 0 || res.indexOf('team member') >= 0) continue; // drop duplicate team rows
-        var b = (w['_ssg_building_value' + F] || '').trim(), un = (w['_ssg_unit_value' + F] || '').trim();
+    var map = {}, usedAgg = false;
+    // --- Fast path: ONE server-side aggregated query, grouped by building+unit+department.
+    //     Excludes canceled bookings and Team Leader/Member resources at the server. ---
+    try {
+      var projValues = ids.map(function (g) { return '<value>' + g + '</value>'; }).join('');
+      var fx =
+        "<fetch aggregate='true'>" +
+          "<entity name='bookableresourcebooking'>" +
+            "<attribute name='bookableresourcebookingid' aggregate='count' alias='cnt'/>" +
+            "<link-entity name='msdyn_workorder' from='msdyn_workorderid' to='msdyn_workorder' link-type='inner' alias='wo'>" +
+              "<attribute name='ssg_building' alias='bld' groupby='true'/>" +
+              "<attribute name='ssg_unit' alias='unt' groupby='true'/>" +
+              "<attribute name='ssg_department' alias='dep' groupby='true'/>" +
+              "<filter type='and'>" +
+                "<condition attribute='ssg_division' operator='eq' value='" + DV_DIVISION_CANDOO + "'/>" +
+                "<condition attribute='ssg_project' operator='in'>" + projValues + "</condition>" +
+              "</filter>" +
+            "</link-entity>" +
+            "<link-entity name='bookableresource' from='bookableresourceid' to='resource' link-type='inner' alias='res'>" +
+              "<filter type='and'>" +
+                "<condition attribute='name' operator='not-like' value='%Team Leader%'/>" +
+                "<condition attribute='name' operator='not-like' value='%Team Member%'/>" +
+              "</filter>" +
+            "</link-entity>" +
+            "<link-entity name='bookingstatus' from='bookingstatusid' to='bookingstatus' link-type='inner' alias='bs'>" +
+              "<filter type='and'><condition attribute='name' operator='not-like' value='%ancel%'/></filter>" +
+            "</link-entity>" +
+          "</entity>" +
+        "</fetch>";
+      var ja = await oppCrmGet(OPP_CRM_API_BASE + '/bookableresourcebookings?fetchXml=' + encodeURIComponent(fx));
+      var rows = ja.value || [];
+      for (var ri = 0; ri < rows.length; ri++) {
+        var r = rows[ri];
+        var b = (r['bld' + F] || '').trim(), un = (r['unt' + F] || '').trim();
         if (!b && !un) continue;
         var key = b + '_' + un;
         if (!map[key]) map[key] = { count: 0, services: new Set() };
-        map[key].count++;
-        map[key].services.add(canonService(w['_ssg_department_value' + F] || ''));
+        map[key].count += (r.cnt || 0);
+        map[key].services.add(canonService(r['dep' + F] || ''));
       }
-      url = j['@odata.nextLink'] || null; guard++;
+      usedAgg = true;
+    } catch (eAgg) {
+      console.warn('[DV] aggregate query failed, falling back to paged fetch:', (eAgg && eAgg.message) || eAgg);
     }
+    // --- Fallback: page through rows and aggregate client-side (used only if aggregate failed). ---
+    if (!usedAgg) {
+      map = {};
+      var projFilter = '(' + ids.map(function (g) { return 'msdyn_workorder/_ssg_project_value eq ' + g; }).join(' or ') + ')';
+      var url = OPP_CRM_API_BASE + '/bookableresourcebookings?$select=_resource_value,_bookingstatus_value&$expand=msdyn_workorder($select=_ssg_building_value,_ssg_unit_value,_ssg_department_value)&$filter=' + encodeURIComponent('msdyn_workorder/_ssg_division_value eq ' + DV_DIVISION_CANDOO + ' and ' + projFilter);
+      var guard = 0;
+      while (url && guard < 60) {
+        var j = await oppCrmGet(url);
+        var arr = j.value || [];
+        for (var i = 0; i < arr.length; i++) {
+          var x = arr[i], w = x.msdyn_workorder || {};
+          var st = (x['_bookingstatus_value' + F] || '').toLowerCase();
+          if (st.indexOf('cancel') >= 0) continue;
+          var res = (x['_resource_value' + F] || '').toLowerCase();
+          if (res.indexOf('team leader') >= 0 || res.indexOf('team member') >= 0) continue;
+          var bb = (w['_ssg_building_value' + F] || '').trim(), uu = (w['_ssg_unit_value' + F] || '').trim();
+          if (!bb && !uu) continue;
+          var k2 = bb + '_' + uu;
+          if (!map[k2]) map[k2] = { count: 0, services: new Set() };
+          map[k2].count++;
+          map[k2].services.add(canonService(w['_ssg_department_value' + F] || ''));
+        }
+        url = j['@odata.nextLink'] || null; guard++;
+      }
+    }
+    console.log('[DV] project bookings ' + (usedAgg ? '(aggregated)' : '(paged)') + ':', project, 'units:', Object.keys(map).length);
     PROJECT_BOOKING_CACHE[project] = map;
     PROJECT_BOOKING_MAP = map;
-    console.log('[DV] project bookings:', project, 'units with our service:', Object.keys(map).length, 'sample key:', Object.keys(map)[0]);
   } catch (e) { console.warn('project bookings failed:', e.message); }
   finally { _projBookingLoading = ''; PROJECT_BOOKING_LOADED[project] = true; }
 }
