@@ -1875,7 +1875,7 @@ function renderTelemetry() {
   }
   var TICON = { ALL: '👥', LAUNDRY: '🧺', HOUSEKEEP: '🧹', MAINT: '🔧', FITOUT: '🛠️' };
   var groups = [['ALL', 'All Visitors']].concat(TELE_SVCS.map(function (s) { return [s, TELE_LBL[s]]; }));
-  var head = '<tr><th class="tproj" rowspan="2">🏢 Project</th><th rowspan="2">📍 Total Units</th><th class="tdate" rowspan="2">📅 Date</th>';
+  var head = '<tr><th class="tproj" rowspan="2">🏢 Project</th><th class="tunits" rowspan="2">📍 Total Units</th><th class="tdate" rowspan="2">📅 Date</th>';
   groups.forEach(function (g) { head += '<th colspan="3" class="tgrp">' + (TICON[g[0]] || '') + ' ' + g[1] + '</th>'; });
   head += '</tr><tr>';
   groups.forEach(function () { head += '<th class="tsub tsc">S &amp; C</th><th class="tsub">Other</th><th class="tsub">Share %</th>'; });
@@ -3590,8 +3590,9 @@ window.DV = DV;
   @keyframes bktspin { to { transform: rotate(360deg); } }
   .tele-tbl{border-collapse:separate;border-spacing:0;font-size:11.5px;width:100%;border:1px solid #dbe3ec;border-radius:10px;overflow:hidden;background:#fff;}
   .tele-tbl th,.tele-tbl td{border-bottom:1px solid #eef1f5;border-right:1px solid #eef1f5;padding:6px 8px;text-align:center;white-space:nowrap;background:#fff;}
-  .tele-tbl th{background-color:#1F466B;background-image:linear-gradient(135deg, var(--slate) 0%, var(--deep-ocean) 60%, var(--steel) 100%);background-attachment:fixed;background-size:100vw 100vh;color:#fff;font-weight:700;letter-spacing:.2px;border-bottom:1px solid rgba(255,255,255,.14);border-right:1px solid rgba(255,255,255,.12);}
-  .tele-tbl th.tgrp{border-left:2px solid rgba(255,255,255,.35);}
+  .tele-tbl th{background-color:#1F466B;background-image:linear-gradient(135deg, var(--slate) 0%, var(--deep-ocean) 60%, var(--steel) 100%);background-attachment:fixed;background-size:100vw 100vh;color:#fff;font-weight:700;letter-spacing:.2px;border:0;}
+  .tele-tbl th.tgrp,.tele-tbl th.tsub.tsc,.tele-tbl th.tunits,.tele-tbl th.tdate{border-left:1px solid rgba(255,255,255,.30);}
+  .tele-tbl thead tr:last-child th{box-shadow:inset 0 -2px 0 rgba(255,255,255,.22);}
   .tele-tbl th.tsub{font-size:10px;color:#eaf1fa;font-weight:600;}
   .tele-tbl th.tsub.tsc{color:#fff;}
   .tele-tbl td.tproj{text-align:center;font-weight:800;color:#1F466B;font-size:12.5px;vertical-align:middle;}
