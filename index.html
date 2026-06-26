@@ -553,6 +553,10 @@
   <div class="section-title">Executive KPIs (click any card for drill-through)</div>
   <div class="kpi-grid" id="kpiGrid"></div>
 
+  <!-- VISITOR TELEMETRY (last 3 days, per project × service) -->
+  <div class="section-title">Visitor Telemetry — Last 3 Days &nbsp;<span style="font-size:11px;font-weight:600;color:var(--muted);text-transform:none;letter-spacing:0;">(URM = our visits · Other = competitor · click any count to drill through)</span></div>
+  <div id="telemetryWrap"></div>
+
   <!-- TOP 10 COMPETITORS -->
   <div class="section-title">Top 10 Competitors Visiting the Building</div>
   <div class="grid-2">
@@ -1163,6 +1167,7 @@ function dismissSplash() {
 ============================================================ */
 function canonService(s) {
   const u = (s||'').toUpperCase();
+  if (u.includes('POOL') || u.includes('SWIM')) return 'POOL';
   if (u.includes('MAINT') || u.includes('HANDYMAN') || u.includes('AMC')) return 'MAINT';
   if (u.includes('CLEAN') || u.includes('HOUSE')) return 'HOUSEKEEP';
   if (u.includes('LAUNDR')) return 'LAUNDRY';
@@ -1171,7 +1176,7 @@ function canonService(s) {
   return 'OTHER';
 }
 function canonLabel(c) {
-  return {MAINT:'Maintenance', HOUSEKEEP:'Housekeeping', LAUNDRY:'Laundry', FITOUT:'Fit-Out', INSPECT:'Inspection', OTHER:'Other'}[c] || c;
+  return {MAINT:'Maintenance', HOUSEKEEP:'Housekeeping', LAUNDRY:'Laundry', FITOUT:'Fit-Out', POOL:'Pool', INSPECT:'Inspection', OTHER:'Other'}[c] || c;
 }
 
 function setupUpload() {
@@ -1324,15 +1329,19 @@ function handleFile(file) {
         gate: headers.findIndex(h => /check.*in.*gate/i.test(h)),
         date: headers.findIndex(h => /check.*in.*date/i.test(h)),
         time: headers.findIndex(h => /check.*in.*time/i.test(h)),
+        type: headers.findIndex(h => /check.*in.*type/i.test(h)),
         purpose: headers.findIndex(h => /purpose/i.test(h)),
         company: headers.findIndex(h => /company/i.test(h)),
         unit: headers.findIndex(h => /unit/i.test(h)),
-        building: headers.findIndex(h => /building.*name|^building$/i.test(h))
+        building: headers.findIndex(h => /building.*name|^building$/i.test(h)),
+        project: headers.findIndex(h => /project/i.test(h))
       };
       const records = [];
       for (let i = headerIdx + 1; i < aoa.length; i++) {
         const row = aoa[i];
         if (!row || !row[idx.company]) continue;
+        // Only keep "Unit Visit" check-ins (applied only when the column is present).
+        if (idx.type >= 0 && String(row[idx.type] || '').trim().toLowerCase() !== 'unit visit') continue;
         const d = row[idx.date];
         let dateStr = '';
         if (d instanceof Date) {
@@ -1352,7 +1361,8 @@ function handleFile(file) {
           purpose: String(row[idx.purpose]||'').trim(),
           company: String(row[idx.company]||'').trim(),
           unit: String(row[idx.unit]||'').trim(),
-          building: String(row[idx.building]||'').trim()
+          building: String(row[idx.building]||'').trim(),
+          project: idx.project >= 0 ? String(row[idx.project]||'').trim().toUpperCase() : ''
         });
       }
       if (records.length === 0) { toast('No records parsed', 'error'); return; }
@@ -1411,6 +1421,7 @@ function recomputeAll() {
   renderSharedUnits();
   renderSegBuckets();
   renderAllCompetitors();
+  try { if (typeof renderTelemetry === 'function') renderTelemetry(); } catch (e) {}
   populateFilters();
 }
 
@@ -1766,6 +1777,125 @@ function buildUnitBuckets() {
 /* ============================================================
    KPIs
 ============================================================ */
+/* ============================================================
+   VISITOR TELEMETRY — last 3 days, per project x service.
+   URM = our visits (Candoo bookings); Other = competitor (VMS, Unit Visit).
+============================================================ */
+var TELEMETRY_URM = {};        // date -> project -> service -> count
+var TELEMETRY_URM_ROWS = [];   // {date,project,service,resource,unit} for drill-through
+var _teleLoading = false;
+var TELE_SVCS = ['LAUNDRY', 'HOUSEKEEP', 'MAINT', 'POOL', 'FITOUT'];
+var TELE_LBL = { LAUNDRY: 'Laundry', HOUSEKEEP: 'Housekeeping', MAINT: 'Handyman', POOL: 'Pool', FITOUT: 'Fitout' };
+function teleAttr(s) { return String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+function teleFmtDate(d) { try { return new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); } catch (e) { return d; } }
+function teleRecentDates() {
+  var dset = {};
+  (typeof ALL_VMS !== 'undefined' ? ALL_VMS : []).forEach(function (r) { if (r && r.date) dset[r.date] = 1; });
+  var ds = Object.keys(dset).sort().reverse().slice(0, 3);
+  if (!ds.length) { var t = new Date(); for (var i = 0; i < 3; i++) { var d = new Date(t); d.setDate(d.getDate() - i); ds.push(d.toISOString().slice(0, 10)); } }
+  return ds;
+}
+async function fetchTelemetryBookings() {
+  if (typeof oppCrmGet !== 'function' || typeof oppAccount === 'undefined' || !oppAccount) return;
+  if (_teleLoading) return; _teleLoading = true;
+  try {
+    var F = '@OData.Community.Display.V1.FormattedValue';
+    var dates = teleRecentDates();
+    var minD = dates[dates.length - 1];
+    var cut = new Date(minD + 'T00:00:00Z'); cut.setUTCHours(cut.getUTCHours() - 4); // Dubai day start in UTC
+    var url = OPP_CRM_API_BASE + '/bookableresourcebookings?$select=ssg_plannedstartdate,_resource_value,_bookingstatus_value&$expand=msdyn_workorder($select=_ssg_project_value,_ssg_department_value,_ssg_building_value,_ssg_unit_value)&$filter=' + encodeURIComponent('msdyn_workorder/_ssg_division_value eq ' + DV_DIVISION_CANDOO + ' and ssg_plannedstartdate ge ' + cut.toISOString());
+    var map = {}, rows = [], guard = 0;
+    while (url && guard < 80) {
+      var j = await oppCrmGet(url);
+      var arr = j.value || [];
+      for (var i = 0; i < arr.length; i++) {
+        var r = arr[i], w = r.msdyn_workorder || {};
+        var stt = (r['_bookingstatus_value' + F] || '').toLowerCase(); if (stt.indexOf('cancel') >= 0) continue;
+        var res = (r['_resource_value' + F] || ''); var resL = res.toLowerCase(); if (resL.indexOf('team leader') >= 0 || resL.indexOf('team member') >= 0) continue;
+        if (!r.ssg_plannedstartdate) continue;
+        var d = new Date(new Date(r.ssg_plannedstartdate).getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10);
+        if (dates.indexOf(d) < 0) continue;
+        var proj = (w['_ssg_project_value' + F] || '').trim().toUpperCase();
+        var svc = canonService(w['_ssg_department_value' + F] || '');
+        if (!map[d]) map[d] = {}; if (!map[d][proj]) map[d][proj] = {};
+        map[d][proj][svc] = (map[d][proj][svc] || 0) + 1;
+        rows.push({ date: d, project: proj, service: svc, resource: res, unit: ((w['_ssg_building_value' + F] || '').trim() + '_' + (w['_ssg_unit_value' + F] || '').trim()) });
+      }
+      url = j['@odata.nextLink'] || null; guard++;
+    }
+    TELEMETRY_URM = map; TELEMETRY_URM_ROWS = rows;
+  } catch (e) { console.warn('[DV] telemetry bookings failed:', e.message); }
+  finally { _teleLoading = false; }
+}
+function bootTelemetry() { return fetchTelemetryBookings().then(function () { if (typeof renderTelemetry === 'function') renderTelemetry(); }); }
+function renderTelemetry() {
+  var wrap = document.getElementById('telemetryWrap'); if (!wrap) return;
+  var dates = teleRecentDates();
+  var projUnits = {};
+  (typeof ALL_LOC !== 'undefined' ? ALL_LOC : []).forEach(function (l) { var p = (l.p || '').toUpperCase(); if (!p) return; (projUnits[p] = projUnits[p] || {})[l.u] = 1; });
+  var projects = Object.keys(projUnits).sort();
+  if (!projects.length) { wrap.innerHTML = '<div style="color:#9aa7b5;font-size:12px;padding:8px;">No location data loaded yet.</div>'; return; }
+  var comp = {};
+  (typeof ALL_VMS !== 'undefined' ? ALL_VMS : []).forEach(function (r) {
+    if (!r || dates.indexOf(r.date) < 0) return;
+    if (typeof dvIsOurCompany === 'function' && dvIsOurCompany(r.company)) return;
+    var p = (r.project || '').toUpperCase(); if (!p) return;
+    var svc = canonService(r.purpose);
+    (comp[r.date] = comp[r.date] || {}); (comp[r.date][p] = comp[r.date][p] || {});
+    comp[r.date][p][svc] = (comp[r.date][p][svc] || 0) + 1;
+  });
+  var html = '';
+  dates.forEach(function (dt) { html += teleBuildTable(dt, projects, projUnits, comp[dt] || {}, (TELEMETRY_URM || {})[dt] || {}); });
+  wrap.innerHTML = html;
+}
+function teleBuildTable(dt, projects, projUnits, compD, urmD) {
+  var groups = [['ALL', 'All Visitors']].concat(TELE_SVCS.map(function (s) { return [s, TELE_LBL[s]]; }));
+  var head = '<tr><th class="tproj">Project</th><th>Pot. Apts</th><th>Data?</th>';
+  groups.forEach(function (g) { head += '<th colspan="3" class="tgrp">' + g[1] + '</th>'; });
+  head += '</tr><tr><th class="tproj"></th><th></th><th></th>';
+  groups.forEach(function () { head += '<th class="tsub">URM</th><th class="tsub">Other</th><th class="tsub">%</th>'; });
+  head += '</tr>';
+  var body = '', totU = {}, totO = {}, totApts = 0;
+  projects.forEach(function (p) {
+    var apts = Object.keys(projUnits[p] || {}).length; totApts += apts;
+    var u = urmD[p] || {}, o = compD[p] || {};
+    var uAll = 0, oAll = 0, kk; for (kk in u) uAll += u[kk]; for (kk in o) oAll += o[kk];
+    var avail = (uAll + oAll) > 0;
+    var row = '<tr><td class="tproj">' + escHtml(p) + '</td><td class="tnum">' + apts.toLocaleString() + '</td><td>' + (avail ? '<span style="color:#2E8B57;font-weight:700">✓</span>' : '<span style="color:#C0392B">✗</span>') + '</td>';
+    function cell(uv, ov, svc) {
+      var pct = (uv + ov) > 0 ? Math.round(uv / (uv + ov) * 100) + '%' : '-';
+      var ud = uv ? '<a href="#" onclick="teleDrill(\'' + dt + '\',\'' + teleAttr(p) + '\',\'' + svc + '\',\'urm\');return false;">' + uv + '</a>' : '0';
+      var od = ov ? '<a href="#" onclick="teleDrill(\'' + dt + '\',\'' + teleAttr(p) + '\',\'' + svc + '\',\'other\');return false;">' + ov + '</a>' : '0';
+      return '<td class="tnum turm">' + ud + '</td><td class="tnum">' + od + '</td><td class="tpct">' + pct + '</td>';
+    }
+    row += cell(uAll, oAll, 'ALL');
+    TELE_SVCS.forEach(function (s) { row += cell(u[s] || 0, o[s] || 0, s); totU[s] = (totU[s] || 0) + (u[s] || 0); totO[s] = (totO[s] || 0) + (o[s] || 0); });
+    totU.ALL = (totU.ALL || 0) + uAll; totO.ALL = (totO.ALL || 0) + oAll;
+    body += row + '</tr>';
+  });
+  var trow = '<tr class="ttot"><td class="tproj">Total</td><td class="tnum">' + totApts.toLocaleString() + '</td><td></td>';
+  ['ALL'].concat(TELE_SVCS).forEach(function (s) {
+    var uv = totU[s] || 0, ov = totO[s] || 0; var pct = (uv + ov) > 0 ? Math.round(uv / (uv + ov) * 100) + '%' : '-';
+    trow += '<td class="tnum turm">' + uv.toLocaleString() + '</td><td class="tnum">' + ov.toLocaleString() + '</td><td class="tpct">' + pct + '</td>';
+  });
+  trow += '</tr>';
+  return '<div class="tele-title">' + teleFmtDate(dt) + '</div><div style="overflow:auto;"><table class="tele-tbl">' + head + body + trow + '</table></div>';
+}
+function teleDrill(dt, proj, svc, which) {
+  var lbl = (svc === 'ALL' ? 'All Visitors' : canonLabel(svc));
+  if (which === 'urm') {
+    var r1 = (TELEMETRY_URM_ROWS || []).filter(function (r) { return r.date === dt && r.project === proj && (svc === 'ALL' || r.service === svc); })
+      .map(function (r) { return '<tr><td>' + escHtml(r.unit) + '</td><td>' + escHtml(canonLabel(r.service)) + '</td><td>' + escHtml(r.resource) + '</td></tr>'; });
+    openModal('Our visits (URM) — ' + escHtml(proj) + ' · ' + escHtml(lbl) + ' · ' + teleFmtDate(dt),
+      '<div class="drill-scroll"><table class="drill-tbl"><thead><tr><th>Unit</th><th>Service</th><th>Resource</th></tr></thead><tbody>' + (r1.join('') || '<tr><td colspan="3" style="color:#9aa7b5;">No records</td></tr>') + '</tbody></table></div>');
+  } else {
+    var r2 = (typeof ALL_VMS !== 'undefined' ? ALL_VMS : []).filter(function (r) { return r.date === dt && (r.project || '').toUpperCase() === proj && !(typeof dvIsOurCompany === 'function' && dvIsOurCompany(r.company)) && (svc === 'ALL' || canonService(r.purpose) === svc); })
+      .map(function (r) { return '<tr><td>' + escHtml(r.unit) + '</td><td>' + escHtml(r.company) + '</td><td>' + escHtml(r.purpose) + '</td></tr>'; });
+    openModal('Competitor visits (Other) — ' + escHtml(proj) + ' · ' + escHtml(lbl) + ' · ' + teleFmtDate(dt),
+      '<div class="drill-scroll"><table class="drill-tbl"><thead><tr><th>Unit</th><th>Company</th><th>Purpose</th></tr></thead><tbody>' + (r2.join('') || '<tr><td colspan="3" style="color:#9aa7b5;">No records</td></tr>') + '</tbody></table></div>');
+  }
+}
+
 function renderKpis() {
   const totalVisits = DATA.length;
   const scVisits = (typeof dvOurVisitTotal === 'function') ? dvOurVisitTotal() : DATA.filter(r => r.company === MY_COMPANY).length;
@@ -3158,6 +3288,7 @@ async function goLiveOpps() {
   await loadLiveOpportunities();
   startOppAutoRefresh();
   if (typeof refreshProjectBookings === 'function') refreshProjectBookings();
+  if (typeof bootTelemetry === 'function') bootTelemetry();
   if (typeof bootDvTables === 'function') bootDvTables().catch(function (e) { console.warn('DV tables boot failed:', e.message); });
 }
 
@@ -3403,6 +3534,19 @@ window.DV = DV;
   #tab2 .section-title { margin-top:6px; margin-bottom:8px; }
   #tab2 .container { padding-top:8px; }
   @keyframes bktspin { to { transform: rotate(360deg); } }
+  .tele-title{font-weight:700;color:#1F466B;font-size:13px;margin:14px 0 4px;}
+  .tele-tbl{border-collapse:collapse;font-size:11px;width:100%;}
+  .tele-tbl th,.tele-tbl td{border:1px solid #e6ebf1;padding:3px 6px;text-align:center;white-space:nowrap;}
+  .tele-tbl th{background:#eef3f8;color:#26415c;font-weight:700;}
+  .tele-tbl th.tgrp{background:#dde8f3;}
+  .tele-tbl th.tsub{font-size:10px;color:#5a6b7d;background:#f4f7fb;font-weight:600;}
+  .tele-tbl td.tproj,.tele-tbl th.tproj{text-align:left;font-weight:600;color:#26415c;}
+  .tele-tbl td.tnum{font-variant-numeric:tabular-nums;}
+  .tele-tbl td.turm{background:#f1f7ff;}
+  .tele-tbl td.tpct{color:#1f6fc4;font-weight:700;}
+  .tele-tbl tr.ttot td{background:#f0f4f9;font-weight:700;border-top:2px solid #ccd7e3;}
+  .tele-tbl a{color:#145A95;text-decoration:none;font-weight:600;}
+  .tele-tbl a:hover{text-decoration:underline;}
   .topfreeze { position:sticky; top:0; z-index:200; }
   .topfreeze .tab-bar { position:static; }
   .drill-tbl a { color:#145A95; text-decoration:none; font-weight:600; }
