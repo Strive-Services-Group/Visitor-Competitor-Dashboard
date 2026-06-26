@@ -92,7 +92,7 @@
   .btn.ghost:hover { background: rgba(255,255,255,.12); }
 
   /* Container */
-  .container { padding: 24px 32px 60px; max-width: 1600px; margin: 0 auto; }
+  .container { padding: 14px 16px 60px; max-width: 100%; margin: 0; }
   .section-title {
     font-size: 16px; font-weight: 700; color: var(--slate);
     margin: 28px 0 14px; display: flex; align-items: center; gap: 8px;
@@ -554,7 +554,7 @@
   <div class="kpi-grid" id="kpiGrid"></div>
 
   <!-- VISITOR TELEMETRY (last 3 days, per project × service) -->
-  <div class="section-title">Visitor Telemetry — Last 3 Days &nbsp;<span style="font-size:11px;font-weight:600;color:var(--muted);text-transform:none;letter-spacing:0;">(URM = our visits · Other = competitor · click any count to drill through)</span></div>
+  <div class="section-title">Visitor Telemetry — Last 3 Days &nbsp;<span style="font-size:11px;font-weight:600;color:var(--muted);text-transform:none;letter-spacing:0;">(S & C = our visits · Other = competitor · click any count to drill through)</span></div>
   <div id="telemetryWrap"></div>
 
   <!-- TOP 10 COMPETITORS -->
@@ -1785,7 +1785,7 @@ var TELEMETRY_URM = {};        // date -> project -> service -> count
 var TELEMETRY_URM_ROWS = [];   // {date,project,service,resource,unit} for drill-through
 var _teleLoading = false;
 var TELE_SVCS = ['LAUNDRY', 'HOUSEKEEP', 'MAINT', 'FITOUT'];
-var TELE_LBL = { LAUNDRY: 'Laundry', HOUSEKEEP: 'Housekeeping', MAINT: 'Handyman', FITOUT: 'Fitout' };
+var TELE_LBL = { LAUNDRY: 'Laundry', HOUSEKEEP: 'Housekeeping', MAINT: 'Maintenance/ Handyman', FITOUT: 'Fitout' };
 var TELE_PROJECTS = ['BALQIS RESIDENCE', 'THE8', 'SOUTH RESIDENCE', 'NORTH RESIDENCE', 'MAG 318', 'SHORELINE 7AND8'];
 var TELE_PROJ_LBL = { 'BALQIS RESIDENCE': 'Balqis Residence', 'THE8': 'THE8', 'SOUTH RESIDENCE': 'South Residence', 'NORTH RESIDENCE': 'North Residence', 'MAG 318': 'MAG 318', 'SHORELINE 7AND8': 'Shoreline 7AND8' };
 function teleIsOurLaundry(c) { return /dima/i.test(c || ''); }  // Dima Laundry = our outsourced laundry → counts as URM
@@ -1833,7 +1833,7 @@ async function fetchTelemetryBookings() {
 function bootTelemetry() { return fetchTelemetryBookings().then(function () { if (typeof renderTelemetry === 'function') renderTelemetry(); }); }
 function renderTelemetry() {
   var wrap = document.getElementById('telemetryWrap'); if (!wrap) return;
-  var dates = teleRecentDates();
+  var dates = teleRecentDates().slice().reverse(); // oldest -> newest
   // apartments per flagship project from Locations master
   var projUnits = {};
   (typeof ALL_LOC !== 'undefined' ? ALL_LOC : []).forEach(function (l) { var p = (l.p || '').toUpperCase(); if (!p) return; (projUnits[p] = projUnits[p] || {})[l.u] = 1; });
@@ -1859,15 +1859,15 @@ function renderTelemetry() {
   var head = '<tr><th class="tproj">Project</th><th>Pot. Apts</th><th class="tdate">Date</th>';
   groups.forEach(function (g) { head += '<th colspan="3" class="tgrp">' + g[1] + '</th>'; });
   head += '</tr><tr><th class="tproj"></th><th></th><th class="tdate"></th>';
-  groups.forEach(function () { head += '<th class="tsub">URM</th><th class="tsub">Other</th><th class="tsub">%</th>'; });
+  groups.forEach(function () { head += '<th class="tsub">S &amp; C</th><th class="tsub">Other</th><th class="tsub">%</th>'; });
   head += '</tr>';
   var body = '';
-  TELE_PROJECTS.forEach(function (p) {
+  TELE_PROJECTS.forEach(function (p, pi) {
     var apts = Object.keys(projUnits[p] || {}).length;
     dates.forEach(function (dt, di) {
       var u = urmFor(dt, p), o = (comp[dt] || {})[p] || {};
       var uAll = 0, oAll = 0, kk; for (kk in u) uAll += u[kk]; for (kk in o) oAll += o[kk];
-      body += '<tr class="' + (di === 0 ? 'pgrp-start' : '') + '">';
+      body += '<tr class="' + (di === 0 ? 'pgrp-start ' : '') + (pi % 2 ? 'palt' : '') + '">';
       if (di === 0) {
         body += '<td class="tproj" rowspan="' + dates.length + '">' + escHtml(TELE_PROJ_LBL[p] || p) + '</td>';
         body += '<td class="tnum tapts" rowspan="' + dates.length + '">' + apts.toLocaleString() + '</td>';
@@ -1896,7 +1896,7 @@ function teleDrill(dt, proj, svc, which) {
       (typeof ALL_VMS !== 'undefined' ? ALL_VMS : []).filter(function (r) { return r.date === dt && (r.project || '').toUpperCase() === proj && teleIsOurLaundry(r.company); })
         .forEach(function (r) { rows.push('<tr><td>' + escHtml(r.unit) + '</td><td>Laundry</td><td>' + escHtml(r.company) + '</td></tr>'); });
     }
-    openModal('Our visits (URM) — ' + escHtml(pl) + ' · ' + escHtml(lbl) + ' · ' + teleFmtDate(dt),
+    openModal('Our visits (S & C) — ' + escHtml(pl) + ' · ' + escHtml(lbl) + ' · ' + teleFmtDate(dt),
       '<div class="drill-scroll"><table class="drill-tbl"><thead><tr><th>Unit</th><th>Service</th><th>Resource / Company</th></tr></thead><tbody>' + (rows.join('') || '<tr><td colspan="3" style="color:#9aa7b5;">No records</td></tr>') + '</tbody></table></div>');
   } else {
     var r2 = (typeof ALL_VMS !== 'undefined' ? ALL_VMS : []).filter(function (r) { return r.date === dt && (r.project || '').toUpperCase() === proj && !(typeof dvIsOurCompany === 'function' && dvIsOurCompany(r.company)) && !teleIsOurLaundry(r.company) && (svc === 'ALL' || canonService(r.purpose) === svc); })
@@ -2424,11 +2424,14 @@ function closeModal() { document.getElementById('modalOverlay').classList.remove
 function showKpiDrill(kind) {
   let rows = [], title = '', sub = [];
   if (kind === 'sc') {
-    rows = DATA.filter(r => r.company === MY_COMPANY);
-    title = 'S &amp; C Building Maintenance — All Visits';
-    const units = new Set(rows.map(r => r.unit)).size;
-    const purposes = [...new Set(rows.map(r => r.purpose))].length;
-    sub = [['Total Visits', rows.length], ['Unique Units', units], ['Service Lines', purposes]];
+    var bm = (typeof PROJECT_BOOKING_MAP !== 'undefined') ? PROJECT_BOOKING_MAP : {};
+    var bkeys = Object.keys(bm).sort();
+    var btot = 0; bkeys.forEach(function (k) { btot += bm[k].count; });
+    var brows = bkeys.map(function (k) { return '<tr><td>' + escHtml(k) + '</td><td class="num">' + bm[k].count + '</td><td>' + escHtml([].concat([...bm[k].services]).map(canonLabel).join(', ')) + '</td></tr>'; }).join('') || '<tr><td colspan="3" style="color:#9aa7b5;">No bookings loaded</td></tr>';
+    var bhtml = '<p style="color:var(--muted);margin-top:0;">S &amp; C / Candoo visits (from bookings) for <b>' + escHtml(typeof SELECTED_PROJECT !== 'undefined' ? SELECTED_PROJECT : '') + '</b> — <b>' + btot.toLocaleString() + '</b> visits across <b>' + bkeys.length + '</b> units (excludes Canceled & Team Leader/Member).</p>' +
+      '<div class="table-scroll" style="max-height:600px;"><table><thead><tr><th>Building / Unit</th><th class="num">Visits</th><th>Services</th></tr></thead><tbody>' + brows + '</tbody></table></div>';
+    openModal('S &amp; C / Candoo Visits (Bookings) — ' + escHtml(typeof SELECTED_PROJECT !== 'undefined' ? SELECTED_PROJECT : ''), bhtml);
+    return;
   } else if (kind === 'competitors') {
     return showCompetitorList();
   } else if (kind === 'top3') {
@@ -3543,6 +3546,10 @@ window.DV = DV;
   #bucketGrid2 .bk-row + .bk-row { border-top:1px solid #eef2f7; padding-top:6px; margin-top:5px; }
   #tab2 .section-title { margin-top:6px; margin-bottom:8px; }
   #tab2 .container { padding-top:8px; }
+  #tab1 .container { padding-top:8px; }
+  #tab1 .container > .section-title:first-child { margin-top:4px; }
+  .tele-tbl tr.palt td.tproj { background:#eaf2fa; }
+  .tele-tbl tr.palt td.tapts { background:#f1f6fb; }
   @keyframes bktspin { to { transform: rotate(360deg); } }
   .tele-tbl{border-collapse:separate;border-spacing:0;font-size:11.5px;width:100%;border:1px solid #dbe3ec;border-radius:10px;overflow:hidden;box-shadow:0 1px 4px rgba(31,70,107,.06);}
   .tele-tbl th,.tele-tbl td{border-bottom:1px solid #eef1f5;border-right:1px solid #eef1f5;padding:6px 8px;text-align:center;white-space:nowrap;}
