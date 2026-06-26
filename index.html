@@ -92,7 +92,7 @@
   .btn.ghost:hover { background: rgba(255,255,255,.12); }
 
   /* Container */
-  .container { padding: 14px 16px 60px; max-width: 100%; margin: 0; }
+  .container { padding: 14px 40px 60px; max-width: 100%; margin: 0; }
   .section-title {
     font-size: 16px; font-weight: 700; color: var(--slate);
     margin: 28px 0 14px; display: flex; align-items: center; gap: 8px;
@@ -1798,16 +1798,21 @@ function teleRecentDates() {
   if (!ds.length) { var t = new Date(); for (var i = 0; i < 3; i++) { var d = new Date(t); d.setDate(d.getDate() - i); ds.push(d.toISOString().slice(0, 10)); } }
   return ds;
 }
+function teleLast7Dates() {
+  var out = [], now = new Date(Date.now() + 4 * 3600 * 1000); // Dubai
+  for (var i = 0; i < 7; i++) { var d = new Date(now); d.setUTCDate(d.getUTCDate() - i); out.push(d.toISOString().slice(0, 10)); }
+  return out;
+}
 async function fetchTelemetryBookings() {
   if (typeof oppCrmGet !== 'function' || typeof oppAccount === 'undefined' || !oppAccount) return;
   if (_teleLoading) return; _teleLoading = true;
   try {
     var F = '@OData.Community.Display.V1.FormattedValue';
-    var dates = teleRecentDates();
+    var dates = teleLast7Dates(); // fetch a 7-day window (covers the 3-day table + 7-day KPIs)
     var minD = dates[dates.length - 1];
     var cut = new Date(minD + 'T00:00:00Z'); cut.setUTCHours(cut.getUTCHours() - 4); // Dubai day start in UTC
     var url = OPP_CRM_API_BASE + '/bookableresourcebookings?$select=ssg_plannedstartdate,_resource_value,_bookingstatus_value&$expand=msdyn_workorder($select=_ssg_project_value,_ssg_department_value,_ssg_building_value,_ssg_unit_value)&$filter=' + encodeURIComponent('msdyn_workorder/_ssg_division_value eq ' + DV_DIVISION_CANDOO + ' and ssg_plannedstartdate ge ' + cut.toISOString());
-    var map = {}, rows = [], guard = 0;
+    var rows = [], guard = 0;
     while (url && guard < 80) {
       var j = await oppCrmGet(url);
       var arr = j.value || [];
@@ -1820,20 +1825,26 @@ async function fetchTelemetryBookings() {
         if (dates.indexOf(d) < 0) continue;
         var proj = (w['_ssg_project_value' + F] || '').trim().toUpperCase();
         var svc = canonService(w['_ssg_department_value' + F] || '');
-        if (!map[d]) map[d] = {}; if (!map[d][proj]) map[d][proj] = {};
-        map[d][proj][svc] = (map[d][proj][svc] || 0) + 1;
         rows.push({ date: d, project: proj, service: svc, resource: res, unit: ((w['_ssg_building_value' + F] || '').trim() + '_' + (w['_ssg_unit_value' + F] || '').trim()) });
       }
       url = j['@odata.nextLink'] || null; guard++;
     }
-    TELEMETRY_URM = map; TELEMETRY_URM_ROWS = rows;
+    TELEMETRY_URM_ROWS = rows;
   } catch (e) { console.warn('[DV] telemetry bookings failed:', e.message); }
   finally { _teleLoading = false; }
 }
-function bootTelemetry() { return fetchTelemetryBookings().then(function () { if (typeof renderTelemetry === 'function') renderTelemetry(); }); }
+function bootTelemetry() { return fetchTelemetryBookings().then(function () { if (typeof renderTelemetry === 'function') renderTelemetry(); if (typeof renderKpis === 'function') renderKpis(); }); }
 function renderTelemetry() {
   var wrap = document.getElementById('telemetryWrap'); if (!wrap) return;
   var dates = teleRecentDates().slice().reverse(); // oldest -> newest
+  // rebuild the 3-day per-date booking map from the cached 7-day rows
+  TELEMETRY_URM = {};
+  (typeof TELEMETRY_URM_ROWS !== 'undefined' ? TELEMETRY_URM_ROWS : []).forEach(function (r) {
+    if (dates.indexOf(r.date) < 0) return;
+    (TELEMETRY_URM[r.date] = TELEMETRY_URM[r.date] || {});
+    (TELEMETRY_URM[r.date][r.project] = TELEMETRY_URM[r.date][r.project] || {});
+    TELEMETRY_URM[r.date][r.project][r.service] = (TELEMETRY_URM[r.date][r.project][r.service] || 0) + 1;
+  });
   // apartments per flagship project from Locations master
   var projUnits = {};
   (typeof ALL_LOC !== 'undefined' ? ALL_LOC : []).forEach(function (l) { var p = (l.p || '').toUpperCase(); if (!p) return; (projUnits[p] = projUnits[p] || {})[l.u] = 1; });
@@ -1855,11 +1866,12 @@ function renderTelemetry() {
     var dl = (dima[dt] || {})[p] || 0; if (dl) out.LAUNDRY = (out.LAUNDRY || 0) + dl;
     return out;
   }
+  var TICON = { ALL: '👥', LAUNDRY: '🧺', HOUSEKEEP: '🧹', MAINT: '🔧', FITOUT: '🛠️' };
   var groups = [['ALL', 'All Visitors']].concat(TELE_SVCS.map(function (s) { return [s, TELE_LBL[s]]; }));
-  var head = '<tr><th class="tproj">Project</th><th>Pot. Apts</th><th class="tdate">Date</th>';
-  groups.forEach(function (g) { head += '<th colspan="3" class="tgrp">' + g[1] + '</th>'; });
+  var head = '<tr><th class="tproj">🏢 Project</th><th>📍 Total Units</th><th class="tdate">📅 Date</th>';
+  groups.forEach(function (g) { head += '<th colspan="3" class="tgrp">' + (TICON[g[0]] || '') + ' ' + g[1] + '</th>'; });
   head += '</tr><tr><th class="tproj"></th><th></th><th class="tdate"></th>';
-  groups.forEach(function () { head += '<th class="tsub">S &amp; C</th><th class="tsub">Other</th><th class="tsub">%</th>'; });
+  groups.forEach(function () { head += '<th class="tsub tsc">S &amp; C</th><th class="tsub">Other</th><th class="tsub">%</th>'; });
   head += '</tr>';
   var body = '';
   TELE_PROJECTS.forEach(function (p, pi) {
@@ -1869,7 +1881,7 @@ function renderTelemetry() {
       var uAll = 0, oAll = 0, kk; for (kk in u) uAll += u[kk]; for (kk in o) oAll += o[kk];
       body += '<tr class="' + (di === 0 ? 'pgrp-start ' : '') + (pi % 2 ? 'palt' : '') + '">';
       if (di === 0) {
-        body += '<td class="tproj" rowspan="' + dates.length + '">' + escHtml(TELE_PROJ_LBL[p] || p) + '</td>';
+        body += '<td class="tproj" rowspan="' + dates.length + '">🏢 ' + escHtml(TELE_PROJ_LBL[p] || p) + '</td>';
         body += '<td class="tnum tapts" rowspan="' + dates.length + '">' + apts.toLocaleString() + '</td>';
       }
       body += '<td class="tdate">' + teleFmtDate(dt) + '</td>';
@@ -1909,19 +1921,23 @@ function teleDrill(dt, proj, svc, which) {
 function renderKpis() {
   const totalVisits = DATA.length;
   const scVisits = (typeof dvOurVisitTotal === 'function') ? dvOurVisitTotal() : DATA.filter(r => r.company === MY_COMPANY).length;
-  const totalCompanies = new Set(DATA.map(r => r.company).filter(Boolean)).size;
   const totalCompetitors = COMPETITOR_LIST.length;
-  const totalUnits = new Set(DATA.map(r => r.unit).filter(Boolean)).size;
   const shareOfVoice = ((scVisits/((scVisits+totalVisits)||1))*100).toFixed(1);
   const top3 = COMPETITOR_LIST.slice(0,3).reduce((s,c)=>s+c.visits,0);
+  // Last-7-days counts (S & C = bookings + Dima laundry; Competitor = VMS excl ours & Dima)
+  var _l7 = (typeof teleLast7Dates === 'function') ? teleLast7Dates() : [];
+  var _proj = (typeof SELECTED_PROJECT !== 'undefined') ? SELECTED_PROJECT : '';
+  var sc7 = (typeof TELEMETRY_URM_ROWS !== 'undefined' ? TELEMETRY_URM_ROWS : []).filter(function (r) { return r.project === _proj && _l7.indexOf(r.date) >= 0; }).length
+          + DATA.filter(function (r) { return (typeof teleIsOurLaundry === 'function' && teleIsOurLaundry(r.company)) && _l7.indexOf(r.date) >= 0; }).length;
+  var comp7 = DATA.filter(function (r) { return !(typeof dvIsOurCompany === 'function' && dvIsOurCompany(r.company)) && !(typeof teleIsOurLaundry === 'function' && teleIsOurLaundry(r.company)) && _l7.indexOf(r.date) >= 0; }).length;
 
   const cards = [
     { color:'#145A95', icon:'📋', label:'Total Visits',            val: totalVisits.toLocaleString(),    sub:'All check-ins in dataset',          drill:'all'   },
     { color:'#2E8B57', icon:'⭐', label:'S & C Visits',            val: scVisits.toLocaleString(),       sub:`${shareOfVoice}% share of voice`,    drill:'sc'    },
     { color:'#E8A33D', icon:'🏢', label:'Active Competitors',      val: totalCompetitors.toLocaleString(),sub:'Distinct competing vendors',        drill:'competitors' },
     { color:'#C0392B', icon:'⚠️', label:'Top-3 Competitor Visits', val: top3.toLocaleString(),           sub:'Combined visits of top 3 rivals',    drill:'top3'  },
-    { color:'#8B5CF6', icon:'🏠', label:'Units Touched (All)',     val: totalUnits.toLocaleString(),     sub:'Unique units serviced',              drill:'units' },
-    { color:'#0EA5E9', icon:'🔍', label:'Total Companies',         val: totalCompanies.toLocaleString(), sub:'All distinct vendors on site',       drill:'companies' },
+    { color:'#0EA5E9', icon:'⭐', label:'S & C Visits (Last 7 Days)',     val: sc7.toLocaleString(),    sub:'Our visits · last 7 days',           drill:'sc7'  },
+    { color:'#C0392B', icon:'🏢', label:'Competitor Visits (Last 7 Days)', val: comp7.toLocaleString(), sub:'Competitor visits · last 7 days',    drill:'comp7' },
   ];
   const html = cards.map(c => `
     <div class="kpi-card" style="border-top-color:${c.color}; --accent-color:${c.color};" onclick="showKpiDrill('${c.drill}')">
@@ -2431,6 +2447,19 @@ function showKpiDrill(kind) {
     var bhtml = '<p style="color:var(--muted);margin-top:0;">S &amp; C / Candoo visits (from bookings) for <b>' + escHtml(typeof SELECTED_PROJECT !== 'undefined' ? SELECTED_PROJECT : '') + '</b> — <b>' + btot.toLocaleString() + '</b> visits across <b>' + bkeys.length + '</b> units (excludes Canceled & Team Leader/Member).</p>' +
       '<div class="table-scroll" style="max-height:600px;"><table><thead><tr><th>Building / Unit</th><th class="num">Visits</th><th>Services</th></tr></thead><tbody>' + brows + '</tbody></table></div>';
     openModal('S &amp; C / Candoo Visits (Bookings) — ' + escHtml(typeof SELECTED_PROJECT !== 'undefined' ? SELECTED_PROJECT : ''), bhtml);
+    return;
+  } else if (kind === 'sc7') {
+    var l7 = teleLast7Dates(), pr = (typeof SELECTED_PROJECT !== 'undefined' ? SELECTED_PROJECT : '');
+    var rws = (typeof TELEMETRY_URM_ROWS !== 'undefined' ? TELEMETRY_URM_ROWS : []).filter(function (r) { return r.project === pr && l7.indexOf(r.date) >= 0; })
+      .map(function (r) { return '<tr><td>' + escHtml(r.date) + '</td><td>' + escHtml(r.unit) + '</td><td>' + escHtml(canonLabel(r.service)) + '</td><td>' + escHtml(r.resource) + '</td></tr>'; });
+    DATA.filter(function (r) { return teleIsOurLaundry(r.company) && l7.indexOf(r.date) >= 0; }).forEach(function (r) { rws.push('<tr><td>' + escHtml(r.date) + '</td><td>' + escHtml(r.unit) + '</td><td>Laundry</td><td>' + escHtml(r.company) + '</td></tr>'); });
+    openModal('S &amp; C Visits — Last 7 Days · ' + escHtml(pr), '<div class="table-scroll" style="max-height:600px;"><table><thead><tr><th>Date</th><th>Unit</th><th>Service</th><th>Resource / Company</th></tr></thead><tbody>' + (rws.join('') || '<tr><td colspan="4" style="color:#9aa7b5;">No records</td></tr>') + '</tbody></table></div>');
+    return;
+  } else if (kind === 'comp7') {
+    var l7b = teleLast7Dates();
+    var rws2 = DATA.filter(function (r) { return !dvIsOurCompany(r.company) && !teleIsOurLaundry(r.company) && l7b.indexOf(r.date) >= 0; })
+      .map(function (r) { return '<tr><td>' + escHtml(r.date) + '</td><td>' + escHtml(r.unit) + '</td><td>' + escHtml(r.company) + '</td><td>' + escHtml(r.purpose) + '</td></tr>'; });
+    openModal('Competitor Visits — Last 7 Days · ' + escHtml(typeof SELECTED_PROJECT !== 'undefined' ? SELECTED_PROJECT : ''), '<div class="table-scroll" style="max-height:600px;"><table><thead><tr><th>Date</th><th>Unit</th><th>Company</th><th>Purpose</th></tr></thead><tbody>' + (rws2.join('') || '<tr><td colspan="4" style="color:#9aa7b5;">No records</td></tr>') + '</tbody></table></div>');
     return;
   } else if (kind === 'competitors') {
     return showCompetitorList();
@@ -3553,15 +3582,16 @@ window.DV = DV;
   @keyframes bktspin { to { transform: rotate(360deg); } }
   .tele-tbl{border-collapse:separate;border-spacing:0;font-size:11.5px;width:100%;border:1px solid #dbe3ec;border-radius:10px;overflow:hidden;box-shadow:0 1px 4px rgba(31,70,107,.06);}
   .tele-tbl th,.tele-tbl td{border-bottom:1px solid #eef1f5;border-right:1px solid #eef1f5;padding:6px 8px;text-align:center;white-space:nowrap;}
-  .tele-tbl th{background:#1F466B;color:#fff;font-weight:700;letter-spacing:.2px;}
-  .tele-tbl th.tgrp{background:#27598a;border-left:1px solid #3d6ea0;}
-  .tele-tbl th.tsub{font-size:10px;color:#dbe7f5;background:#33639a;font-weight:600;}
-  .tele-tbl th.tproj,.tele-tbl th.tdate{background:#163a5c;}
+  .tele-tbl th{background:linear-gradient(180deg,#2a5e93,#1f4d7e);color:#fff;font-weight:700;letter-spacing:.2px;}
+  .tele-tbl th.tgrp{background:linear-gradient(180deg,#316aa3,#26588a);border-left:2px solid #cfe0ee;}
+  .tele-tbl th.tsub{font-size:10px;color:#e3eefb;background:#35669e;font-weight:600;}
+  .tele-tbl th.tsub.tsc{background:#2c5586;color:#fff;}
+  .tele-tbl th.tproj,.tele-tbl th.tdate{background:linear-gradient(180deg,#21527f,#173e60);}
   .tele-tbl td.tproj{text-align:left;font-weight:800;color:#1F466B;background:#f4f8fc;font-size:12.5px;vertical-align:middle;}
-  .tele-tbl td.tapts{font-weight:700;color:#5a6b7d;background:#f9fbfd;vertical-align:middle;}
+  .tele-tbl td.tapts{font-weight:700;color:#5a6b7d;background:#f9fbfd;vertical-align:middle;text-align:center;}
   .tele-tbl td.tdate{text-align:left;font-weight:600;color:#5a6b7d;}
   .tele-tbl td.tnum{font-variant-numeric:tabular-nums;}
-  .tele-tbl td.turm{background:#eef6ff;font-weight:700;}
+  .tele-tbl td.turm{background:#e3eefc;font-weight:700;border-left:1px solid #d4e3f5;}
   .tele-tbl td.tpct{color:#1f6fc4;font-weight:700;}
   .tele-tbl td .tzero{color:#c5cfdb;}
   .tele-tbl tbody tr:hover td{background:#fcfdff;}
