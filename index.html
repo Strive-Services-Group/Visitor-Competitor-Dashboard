@@ -1791,7 +1791,37 @@ var TELE_PROJ_LBL = { 'BALQIS RESIDENCE': 'Balqis Residence', 'THE8': 'THE8', 'S
 function teleIsOurLaundry(c) { return /dima/i.test(c || ''); }  // Dima Laundry = our outsourced laundry → counts as URM
 function teleAttr(s) { return String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
 function teleFmtDate(d) { try { return new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' }).replace(',', ''); } catch (e) { return d; } }
-function teleBucketOf(u) { try { return (typeof SEG_META !== 'undefined' && SEG_META && SEG_META[u]) ? SEG_META[u].bucket : '-'; } catch (e) { return '-'; } }  // which segmentation bucket the unit sits in (selected project only)
+var TELE_BUCKET_MAP = null;
+function teleBuildBucketMap() {  // GLOBAL A+/A/B/E/F per unit across ALL projects (competitor VMS + our Candoo bookings), independent of the header project filter
+  var comp = {}, ours = {};
+  (typeof ALL_VMS !== 'undefined' ? ALL_VMS : []).forEach(function (r) {
+    if (!r || !r.unit) return;
+    if (typeof dvIsOurCompany === 'function' && dvIsOurCompany(r.company)) return;
+    if (teleIsOurLaundry(r.company)) return;
+    (comp[r.unit] = comp[r.unit] || {})[canonService(r.purpose)] = 1;
+  });
+  if (window.DV && DV.booking && DV.booking.rows) {
+    DV.booking.rows.forEach(function (b) { if (b && b.buildingUnit) (ours[b.buildingUnit] = ours[b.buildingUnit] || {})[canonService(b.woDepartment)] = 1; });
+  }
+  var map = {}, u, k, cs, os, hasC, hasO, overlap, units = {};
+  for (u in comp) units[u] = 1; for (u in ours) units[u] = 1;
+  for (u in units) {
+    cs = comp[u] || {}; os = ours[u] || {};
+    hasC = Object.keys(cs).length > 0; hasO = Object.keys(os).length > 0;
+    if (hasO && !hasC) map[u] = 'A+';
+    else if (hasO && hasC) { overlap = false; for (k in os) if (cs[k]) { overlap = true; break; } map[u] = overlap ? 'A' : 'B'; }
+    else if (!hasO && hasC) map[u] = 'E';
+    else map[u] = 'F';
+  }
+  TELE_BUCKET_MAP = map;
+}
+function teleBucketOf(u) {  // selected-project SEG_META is authoritative (incl C/D); otherwise use the global map so EVERY project shows a bucket
+  try {
+    if (typeof SEG_META !== 'undefined' && SEG_META && SEG_META[u]) return SEG_META[u].bucket;
+    if (!TELE_BUCKET_MAP) teleBuildBucketMap();
+    return (TELE_BUCKET_MAP && TELE_BUCKET_MAP[u]) ? TELE_BUCKET_MAP[u] : '-';
+  } catch (e) { return '-'; }
+}
 function teleBucketBadge(u) {  // colored A+/A/B/C/D/E/F pill, looked up from the unit
   var b = teleBucketOf(u);
   if (!b || b === '-') return '<span style="color:#c5cfdb;">\u2013</span>';
@@ -1853,6 +1883,7 @@ async function fetchTelemetryBookings() {
 function bootTelemetry() { return fetchTelemetryBookings().then(function () { if (typeof renderTelemetry === 'function') renderTelemetry(); if (typeof renderKpis === 'function') renderKpis(); }); }
 function renderTelemetry() {
   var wrap = document.getElementById('telemetryWrap'); if (!wrap) return;
+  teleBuildBucketMap();
   var dates = teleRecentDates().slice().reverse(); // oldest -> newest
   // rebuild the 3-day per-date booking map from the cached 7-day rows
   TELEMETRY_URM = {};
