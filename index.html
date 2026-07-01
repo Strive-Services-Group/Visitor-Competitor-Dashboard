@@ -1856,10 +1856,11 @@ function renderTelemetry() {
   var projUnits = {};
   (typeof ALL_LOC !== 'undefined' ? ALL_LOC : []).forEach(function (l) { var p = (l.p || '').toUpperCase(); if (!p) return; (projUnits[p] = projUnits[p] || {})[l.u] = 1; });
   // competitor (Other) and Dima (our outsourced laundry) from VMS
-  var comp = {}, dima = {};
+  var comp = {}, dima = {}, vmsSeen = {};
   (typeof ALL_VMS !== 'undefined' ? ALL_VMS : []).forEach(function (r) {
     if (!r || dates.indexOf(r.date) < 0) return;
     var p = (r.project || '').toUpperCase(); if (TELE_PROJECTS.indexOf(p) < 0) return;
+    (vmsSeen[r.date] = vmsSeen[r.date] || {})[p] = true; // competitor data exists for this project/date
     if (typeof dvIsOurCompany === 'function' && dvIsOurCompany(r.company)) return; // our staff aren't visitors
     if (teleIsOurLaundry(r.company)) { (dima[r.date] = dima[r.date] || {}); dima[r.date][p] = (dima[r.date][p] || 0) + 1; return; }
     var svc = canonService(r.purpose);
@@ -1886,6 +1887,7 @@ function renderTelemetry() {
     dates.forEach(function (dt, di) {
       var u = urmFor(dt, p), o = (comp[dt] || {})[p] || {};
       var uAll = 0, oAll = 0, kk; for (kk in u) uAll += u[kk]; for (kk in o) oAll += o[kk];
+      var noVms = !(vmsSeen[dt] && vmsSeen[dt][p]); // no competitor data uploaded for this project/date
       body += '<tr class="' + (di === 0 ? 'pgrp-start ' : '') + (pi % 2 ? 'palt' : '') + '">';
       if (di === 0) {
         body += '<td class="tproj" rowspan="' + dates.length + '">🏢 ' + escHtml(TELE_PROJ_LBL[p] || p) + '</td>';
@@ -1893,11 +1895,12 @@ function renderTelemetry() {
       }
       body += '<td class="tdate">' + teleFmtDate(dt) + '</td>';
       function cell(uv, ov, svc) {
+        var ud = uv ? '<a href="#" onclick="teleDrill(\'' + dt + '\',\'' + teleAttr(p) + '\',\'' + svc + '\',\'urm\');return false;">' + uv + '</a>' : '<span class="tzero">0</span>';
+        if (noVms) { return '<td class="tnum turm">' + ud + '</td><td class="tnu" title="Competitor data not updated for this day">Not Updated</td><td class="tpct">-</td>'; }
         var has = (uv + ov) > 0;
         var pn = has ? Math.round(uv / (uv + ov) * 100) : null;
         var pct = has ? pn + '%' : '-';
         var heat = has ? ' style="background:' + teleHeat(pn) + '"' : '';
-        var ud = uv ? '<a href="#" onclick="teleDrill(\'' + dt + '\',\'' + teleAttr(p) + '\',\'' + svc + '\',\'urm\');return false;">' + uv + '</a>' : '<span class="tzero">0</span>';
         var od = ov ? '<a href="#" onclick="teleDrill(\'' + dt + '\',\'' + teleAttr(p) + '\',\'' + svc + '\',\'other\');return false;">' + ov + '</a>' : '<span class="tzero">0</span>';
         return '<td class="tnum turm">' + ud + '</td><td class="tnum">' + od + '</td><td class="tpct"' + heat + '>' + pct + '</td>';
       }
@@ -3605,6 +3608,7 @@ window.DV = DV;
   .tele-tbl td.turm{background:#f3f7fc;font-weight:700;border-left:2px solid #c6d4e4;}
   .tele-tbl td.tpct{font-weight:700;color:#33415a;}
   .tele-tbl td .tzero{color:#c5cfdb;}
+  .tele-tbl td.tnu{font-size:9.5px;color:#c0392b;font-style:italic;font-weight:600;white-space:nowrap;background:#fff;}
   .tele-tbl tr.pgrp-start td{border-top:2px solid #c3d2e2;}
   .tele-tbl a{color:#145A95;text-decoration:none;font-weight:700;}
   .tele-tbl a:hover{text-decoration:underline;}
