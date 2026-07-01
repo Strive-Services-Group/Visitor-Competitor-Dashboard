@@ -1341,11 +1341,11 @@ function handleFile(file) {
         const row = aoa[i];
         if (!row || !row[idx.company]) continue;
         // Only keep "Unit Visit" check-ins (applied only when the column is present).
-        if (idx.type >= 0 && String(row[idx.type] || '').trim().toLowerCase() !== 'unit visit') continue;
+        if (idx.type >= 0 && String(row[idx.type] || '').trim().toLowerCase() !== 'unit visit' && !/dima/i.test(String(row[idx.company] || ''))) continue;
         const d = row[idx.date];
         let dateStr = '';
         if (d instanceof Date) {
-          dateStr = d.toISOString().slice(0,10);
+          dateStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
         } else if (typeof d === 'string' && d) {
           const pd = new Date(d);
           if (!isNaN(pd)) dateStr = pd.toISOString().slice(0,10);
