@@ -1313,7 +1313,7 @@ function handleFile(file) {
   const reader = new FileReader();
   reader.onload = (e) => {
     try {
-      const wb = XLSX.read(new Uint8Array(e.target.result), { type:'array', cellDates:true });
+      const wb = XLSX.read(new Uint8Array(e.target.result), { type:'array' }); // no cellDates -> date cells stay serials, parsed via SSF (timezone-safe; fixes midnight-date day-shift)
       const sn = wb.SheetNames[0];
       const ws = wb.Sheets[sn];
       // Header is on row 2 in source file → try header:1 then locate header row
