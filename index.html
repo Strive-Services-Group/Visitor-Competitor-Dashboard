@@ -1800,12 +1800,14 @@ function teleHeat(p) { // Excel-style red->yellow->green scale for Share %
   return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * t) + ',' + Math.round(a[1] + (b[1] - a[1]) * t) + ',' + Math.round(a[2] + (b[2] - a[2]) * t) + ')';
 }
 function teleRecentDates() {
-  // Always anchor to the calendar last 3 days (Dubai), newest first, so TODAY
-  // always shows even if competitor data for today hasn't been uploaded yet
-  // (its Other cells then read "⚠️ Not updated").
-  var out = [], now = new Date(Date.now() + 4 * 3600 * 1000); // Dubai (UTC+4)
-  for (var i = 0; i < 3; i++) { var d = new Date(now); d.setUTCDate(d.getUTCDate() - i); out.push(d.toISOString().slice(0, 10)); }
-  return out;
+  // The 3 most recent days that actually have competitor data, newest first.
+  // Data is uploaded a day behind, so this ends at yesterday (the latest date
+  // present) — today is not shown until its data lands.
+  var dset = {};
+  (typeof ALL_VMS !== 'undefined' ? ALL_VMS : []).forEach(function (r) { if (r && r.date) dset[r.date] = 1; });
+  var ds = Object.keys(dset).sort().reverse().slice(0, 3);
+  if (!ds.length) { var t = new Date(Date.now() + 4 * 3600 * 1000); for (var i = 0; i < 3; i++) { var d = new Date(t); d.setUTCDate(d.getUTCDate() - i); ds.push(d.toISOString().slice(0, 10)); } }
+  return ds;
 }
 function teleLast7Dates() {
   var out = [], now = new Date(Date.now() + 4 * 3600 * 1000); // Dubai
@@ -3609,7 +3611,4 @@ window.DV = DV;
   .tele-tbl th.tgrp,.tele-tbl th.tsub.tsc{border-left:2px solid rgba(255,255,255,.40);}
   .tele-tbl th.tunits,.tele-tbl th.tdate{border-left:1px solid rgba(255,255,255,.30);}
   .tele-tbl th.tgrp{border-bottom:1px solid rgba(255,255,255,.22);}
-  .tele-tbl thead tr:last-child th{box-shadow:inset 0 -2px 0 rgba(255,255,255,.22);}
-  .tele-tbl th.tsub{font-size:10px;color:#eaf1fa;font-weight:600;}
-  .tele-tbl th.tsub.tsc{color:#fff;}
-  .tele-tbl td.tproj{text-align:center
+  .tele-tbl thead tr:last-child th{box-shadow:inse
