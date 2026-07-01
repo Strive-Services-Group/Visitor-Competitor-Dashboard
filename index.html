@@ -1800,11 +1800,12 @@ function teleHeat(p) { // Excel-style red->yellow->green scale for Share %
   return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * t) + ',' + Math.round(a[1] + (b[1] - a[1]) * t) + ',' + Math.round(a[2] + (b[2] - a[2]) * t) + ')';
 }
 function teleRecentDates() {
-  var dset = {};
-  (typeof ALL_VMS !== 'undefined' ? ALL_VMS : []).forEach(function (r) { if (r && r.date) dset[r.date] = 1; });
-  var ds = Object.keys(dset).sort().reverse().slice(0, 3);
-  if (!ds.length) { var t = new Date(); for (var i = 0; i < 3; i++) { var d = new Date(t); d.setDate(d.getDate() - i); ds.push(d.toISOString().slice(0, 10)); } }
-  return ds;
+  // Always anchor to the calendar last 3 days (Dubai), newest first, so TODAY
+  // always shows even if competitor data for today hasn't been uploaded yet
+  // (its Other cells then read "⚠️ Not updated").
+  var out = [], now = new Date(Date.now() + 4 * 3600 * 1000); // Dubai (UTC+4)
+  for (var i = 0; i < 3; i++) { var d = new Date(now); d.setUTCDate(d.getUTCDate() - i); out.push(d.toISOString().slice(0, 10)); }
+  return out;
 }
 function teleLast7Dates() {
   var out = [], now = new Date(Date.now() + 4 * 3600 * 1000); // Dubai
@@ -3611,27 +3612,4 @@ window.DV = DV;
   .tele-tbl thead tr:last-child th{box-shadow:inset 0 -2px 0 rgba(255,255,255,.22);}
   .tele-tbl th.tsub{font-size:10px;color:#eaf1fa;font-weight:600;}
   .tele-tbl th.tsub.tsc{color:#fff;}
-  .tele-tbl td.tproj{text-align:center;font-weight:800;color:#1F466B;font-size:14px;vertical-align:middle;}
-  .tele-tbl td.tapts{text-align:center;font-weight:700;color:#5a6b7d;vertical-align:middle;background:#fff;}
-  .tele-tbl td.tdate{text-align:center;font-weight:600;color:#5a6b7d;vertical-align:middle;}
-  .tele-tbl td.tnum{font-variant-numeric:tabular-nums;}
-  .tele-tbl td.tnum:not(.turm){background:#fff;}
-  .tele-tbl td.turm{background:#f3f7fc;font-weight:700;border-left:2px solid #c6d4e4;}
-  .tele-tbl td.tpct{font-weight:700;color:#33415a;}
-  .tele-tbl td .tzero{color:#c5cfdb;}
-  .tele-tbl td.tnu{font-size:9.5px;color:#c0392b;font-style:italic;font-weight:600;white-space:nowrap;background:#fff;}
-  .tele-tbl tr.pgrp-start td{border-top:2px solid #c3d2e2;}
-  .tele-tbl a{color:#145A95;text-decoration:none;font-weight:700;}
-  .tele-tbl a:hover{text-decoration:underline;}
-  .topfreeze { position:sticky; top:0; z-index:200; }
-  .topfreeze .tab-bar { position:static; }
-  .drill-tbl a { color:#145A95; text-decoration:none; font-weight:600; }
-  .drill-tbl a:hover { text-decoration:underline; }
-  #unitMatrixTable .um-names a { color:#145A95; text-decoration:none; }
-  #unitMatrixTable .um-names a:hover { text-decoration:underline; }
-  #unitMatrixTable td.um-unit { font-size:12px !important; font-weight:700 !important; }
-  #unitMatrixTable th, #unitMatrixTable td { border-right:1px solid #eef2f7; }
-  #unitMatrixTable th:last-child, #unitMatrixTable td:last-child { border-right:none; }
-</style>
-</body>
-</html>
+  .tele-tbl td.tproj{text-align:center
