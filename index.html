@@ -1790,7 +1790,8 @@ var TELE_PROJECTS = ['BALQIS RESIDENCE', 'THE8', 'SOUTH RESIDENCE', 'NORTH RESID
 var TELE_PROJ_LBL = { 'BALQIS RESIDENCE': 'Balqis Residence', 'THE8': 'THE8', 'SOUTH RESIDENCE': 'South Residence', 'NORTH RESIDENCE': 'North Residence', 'MAG 318': 'MAG 318', 'SHORELINE 7AND8': 'Shoreline 7AND8' };
 function teleIsOurLaundry(c) { return /dima/i.test(c || ''); }  // Dima Laundry = our outsourced laundry → counts as URM
 function teleAttr(s) { return String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
-function teleFmtDate(d) { try { return new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); } catch (e) { return d; } }
+function teleFmtDate(d) { try { return new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' }).replace(',', ''); } catch (e) { return d; } }
+function teleBucketOf(u) { try { return (typeof SEG_META !== 'undefined' && SEG_META && SEG_META[u]) ? SEG_META[u].bucket : '-'; } catch (e) { return '-'; } }  // which segmentation bucket the unit sits in (selected project only)
 function teleHeat(p) { // Excel-style red->yellow->green scale for Share %
   if (p == null || isNaN(p)) return '';
   p = Math.max(0, Math.min(100, p));
@@ -1818,7 +1819,7 @@ async function fetchTelemetryBookings() {
     var dates = teleLast7Dates(); // fetch a 7-day window (covers the 3-day table + 7-day KPIs)
     var minD = dates[dates.length - 1];
     var cut = new Date(minD + 'T00:00:00Z'); cut.setUTCHours(cut.getUTCHours() - 4); // Dubai day start in UTC
-    var url = OPP_CRM_API_BASE + '/bookableresourcebookings?$select=ssg_plannedstartdate,_resource_value,_bookingstatus_value&$expand=msdyn_workorder($select=_ssg_project_value,_ssg_department_value,_ssg_building_value,_ssg_unit_value)&$filter=' + encodeURIComponent('msdyn_workorder/_ssg_division_value eq ' + DV_DIVISION_CANDOO + ' and ssg_plannedstartdate ge ' + cut.toISOString());
+    var url = OPP_CRM_API_BASE + '/bookableresourcebookings?$select=ssg_plannedstartdate,_resource_value,_bookingstatus_value&$expand=msdyn_workorder($select=_ssg_project_value,_ssg_department_value,_ssg_building_value,_ssg_unit_value,ssg_title,_msdyn_workordertype_value)&$filter=' + encodeURIComponent('msdyn_workorder/_ssg_division_value eq ' + DV_DIVISION_CANDOO + ' and ssg_plannedstartdate ge ' + cut.toISOString());
     var rows = [], guard = 0;
     while (url && guard < 80) {
       var j = await oppCrmGet(url);
@@ -1827,12 +1828,14 @@ async function fetchTelemetryBookings() {
         var r = arr[i], w = r.msdyn_workorder || {};
         var stt = (r['_bookingstatus_value' + F] || '').toLowerCase(); if (stt.indexOf('cancel') >= 0) continue;
         var res = (r['_resource_value' + F] || ''); var resL = res.toLowerCase(); if (resL.indexOf('team leader') >= 0 || resL.indexOf('team member') >= 0) continue;
+        var wtype = (w['_msdyn_workordertype_value' + F] || ''); if (!/reactive/i.test(wtype)) continue; // only Reactive-Chargeable / Reactive-NonChargeable
         if (!r.ssg_plannedstartdate) continue;
         var d = new Date(new Date(r.ssg_plannedstartdate).getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10);
         if (dates.indexOf(d) < 0) continue;
         var proj = (w['_ssg_project_value' + F] || '').trim().toUpperCase();
-        var svc = canonService(w['_ssg_department_value' + F] || '');
-        rows.push({ date: d, project: proj, service: svc, resource: res, unit: ((w['_ssg_building_value' + F] || '').trim() + '_' + (w['_ssg_unit_value' + F] || '').trim()) });
+        var dept = (w['_ssg_department_value' + F] || '');
+        var svc = canonService(dept);
+        rows.push({ date: d, project: proj, service: svc, resource: res, unit: ((w['_ssg_building_value' + F] || '').trim() + '_' + (w['_ssg_unit_value' + F] || '').trim()), planned: r.ssg_plannedstartdate, title: (w.ssg_title || ''), dept: dept, status: (r['_bookingstatus_value' + F] || ''), wtype: wtype });
       }
       url = j['@odata.nextLink'] || null; guard++;
     }
@@ -1867,11 +1870,12 @@ function renderTelemetry() {
     (comp[r.date] = comp[r.date] || {}); (comp[r.date][p] = comp[r.date][p] || {});
     comp[r.date][p][svc] = (comp[r.date][p][svc] || 0) + 1;
   });
-  // URM = Candoo bookings (per service) + Dima laundry (no laundry in bookings)
+  // URM = Candoo bookings (per service). Laundry is NOT a Candoo booking service —
+  // our laundry count comes from the visitor data (company = Dima).
   function urmFor(dt, p) {
     var base = ((TELEMETRY_URM || {})[dt] || {})[p] || {};
     var out = {}; for (var k in base) out[k] = base[k];
-    var dl = (dima[dt] || {})[p] || 0; if (dl) out.LAUNDRY = (out.LAUNDRY || 0) + dl;
+    out.LAUNDRY = (dima[dt] || {})[p] || 0; // ours laundry = Dima rows from visitor data
     return out;
   }
   var TICON = { ALL: '👥', LAUNDRY: '🧺', HOUSEKEEP: '🧹', MAINT: '🔧', FITOUT: '🛠️' };
@@ -1896,7 +1900,7 @@ function renderTelemetry() {
       body += '<td class="tdate">' + teleFmtDate(dt) + '</td>';
       function cell(uv, ov, svc) {
         var ud = uv ? '<a href="#" onclick="teleDrill(\'' + dt + '\',\'' + teleAttr(p) + '\',\'' + svc + '\',\'urm\');return false;">' + uv + '</a>' : '<span class="tzero">0</span>';
-        if (noVms) { return '<td class="tnum turm">' + ud + '</td><td class="tnu" title="Competitor data not updated for this day">Not Updated</td><td class="tpct">-</td>'; }
+        if (noVms) { return '<td class="tnum turm">' + ud + '</td><td class="tnu" title="No competitor records found for this day">⚠️ Not updated</td><td class="tpct">-</td>'; }
         var has = (uv + ov) > 0;
         var pn = has ? Math.round(uv / (uv + ov) * 100) : null;
         var pct = has ? pn + '%' : '-';
@@ -1915,19 +1919,26 @@ function teleDrill(dt, proj, svc, which) {
   var lbl = (svc === 'ALL' ? 'All Visitors' : canonLabel(svc));
   var pl = TELE_PROJ_LBL[proj] || proj;
   if (which === 'urm') {
-    var rows = (TELEMETRY_URM_ROWS || []).filter(function (r) { return r.date === dt && r.project === proj && (svc === 'ALL' || r.service === svc); })
-      .map(function (r) { return '<tr><td>' + escHtml(r.unit) + '</td><td>' + escHtml(canonLabel(r.service)) + '</td><td>' + escHtml(r.resource) + '</td></tr>'; });
+    // Candoo bookings (same layout as the unit "Candoo Home Services Visits" table) + Bucket.
+    // Laundry is Dima-from-visitor-data, so exclude any booking LAUNDRY rows from ALL.
+    var bookRows = (svc === 'LAUNDRY') ? [] : (TELEMETRY_URM_ROWS || []).filter(function (r) {
+      return r.date === dt && r.project === proj && (svc === 'ALL' ? r.service !== 'LAUNDRY' : r.service === svc);
+    });
+    bookRows.sort(function (a, b) { return (b.planned || '').localeCompare(a.planned || ''); });
+    var rows = bookRows.map(function (r) {
+      return '<tr><td>' + escHtml(dvFmtDT(r.planned)) + '</td><td>' + escHtml(r.resource || '') + '</td><td>' + escHtml(r.title || '') + '</td><td>' + escHtml(r.dept || canonLabel(r.service)) + '</td><td>' + escHtml(r.status || '') + '</td><td>' + escHtml(teleBucketOf(r.unit)) + '</td></tr>';
+    });
     if (svc === 'ALL' || svc === 'LAUNDRY') {
       (typeof ALL_VMS !== 'undefined' ? ALL_VMS : []).filter(function (r) { return r.date === dt && (r.project || '').toUpperCase() === proj && teleIsOurLaundry(r.company); })
-        .forEach(function (r) { rows.push('<tr><td>' + escHtml(r.unit) + '</td><td>Laundry</td><td>' + escHtml(r.company) + '</td></tr>'); });
+        .forEach(function (r) { rows.push('<tr><td>' + escHtml(teleFmtDate(r.date)) + '</td><td>' + escHtml(r.company || '') + '</td><td>Laundry (Dima)</td><td>Laundry</td><td>—</td><td>' + escHtml(teleBucketOf(r.unit)) + '</td></tr>'); });
     }
     openModal('Our visits (S & C) — ' + escHtml(pl) + ' · ' + escHtml(lbl) + ' · ' + teleFmtDate(dt),
-      '<div class="drill-scroll"><table class="drill-tbl"><thead><tr><th>Unit</th><th>Service</th><th>Resource / Company</th></tr></thead><tbody>' + (rows.join('') || '<tr><td colspan="3" style="color:#9aa7b5;">No records</td></tr>') + '</tbody></table></div>');
+      '<div class="drill-scroll"><table class="drill-tbl"><thead><tr><th>Date (Planned)</th><th>Resource</th><th>Work Order Title</th><th>Purpose</th><th>Status</th><th>Bucket</th></tr></thead><tbody>' + (rows.join('') || '<tr><td colspan="6" style="color:#9aa7b5;">No records</td></tr>') + '</tbody></table></div>');
   } else {
     var r2 = (typeof ALL_VMS !== 'undefined' ? ALL_VMS : []).filter(function (r) { return r.date === dt && (r.project || '').toUpperCase() === proj && !(typeof dvIsOurCompany === 'function' && dvIsOurCompany(r.company)) && !teleIsOurLaundry(r.company) && (svc === 'ALL' || canonService(r.purpose) === svc); })
-      .map(function (r) { return '<tr><td>' + escHtml(r.unit) + '</td><td>' + escHtml(r.company) + '</td><td>' + escHtml(r.purpose) + '</td></tr>'; });
+      .map(function (r) { return '<tr><td>' + escHtml(r.unit) + '</td><td>' + escHtml(r.company) + '</td><td>' + escHtml(r.purpose) + '</td><td>' + escHtml(teleBucketOf(r.unit)) + '</td></tr>'; });
     openModal('Competitor visits (Other) — ' + escHtml(pl) + ' · ' + escHtml(lbl) + ' · ' + teleFmtDate(dt),
-      '<div class="drill-scroll"><table class="drill-tbl"><thead><tr><th>Unit</th><th>Company</th><th>Purpose</th></tr></thead><tbody>' + (r2.join('') || '<tr><td colspan="3" style="color:#9aa7b5;">No records</td></tr>') + '</tbody></table></div>');
+      '<div class="drill-scroll"><table class="drill-tbl"><thead><tr><th>Unit</th><th>Company</th><th>Purpose</th><th>Bucket</th></tr></thead><tbody>' + (r2.join('') || '<tr><td colspan="4" style="color:#9aa7b5;">No records</td></tr>') + '</tbody></table></div>');
   }
 }
 
