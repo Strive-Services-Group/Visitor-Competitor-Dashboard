@@ -1792,6 +1792,13 @@ function teleIsOurLaundry(c) { return /dima/i.test(c || ''); }  // Dima Laundry 
 function teleAttr(s) { return String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
 function teleFmtDate(d) { try { return new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' }).replace(',', ''); } catch (e) { return d; } }
 function teleBucketOf(u) { try { return (typeof SEG_META !== 'undefined' && SEG_META && SEG_META[u]) ? SEG_META[u].bucket : '-'; } catch (e) { return '-'; } }  // which segmentation bucket the unit sits in (selected project only)
+function teleBucketBadge(u) {  // colored A+/A/B/C/D/E/F pill, looked up from the unit
+  var b = teleBucketOf(u);
+  if (!b || b === '-') return '<span style="color:#c5cfdb;">\u2013</span>';
+  var c = '#64748B';
+  try { if (typeof SEG_DEFS !== 'undefined') { for (var i = 0; i < SEG_DEFS.length; i++) { if (SEG_DEFS[i].k === b) { c = SEG_DEFS[i].color; break; } } } } catch (e) {}
+  return '<span style="display:inline-block;min-width:20px;text-align:center;padding:1px 8px;border-radius:10px;background:' + c + ';color:#fff;font-weight:700;font-size:11px;letter-spacing:.3px;">' + escHtml(b) + '</span>';
+}
 function teleHeat(p) { // Excel-style red->yellow->green scale for Share %
   if (p == null || isNaN(p)) return '';
   p = Math.max(0, Math.min(100, p));
@@ -1926,17 +1933,17 @@ function teleDrill(dt, proj, svc, which) {
     });
     bookRows.sort(function (a, b) { return (b.planned || '').localeCompare(a.planned || ''); });
     var rows = bookRows.map(function (r) {
-      return '<tr><td>' + escHtml(dvFmtDT(r.planned)) + '</td><td>' + escHtml(r.resource || '') + '</td><td>' + escHtml(r.title || '') + '</td><td>' + escHtml(r.dept || canonLabel(r.service)) + '</td><td>' + escHtml(r.status || '') + '</td><td>' + escHtml(teleBucketOf(r.unit)) + '</td></tr>';
+      return '<tr><td>' + escHtml(dvFmtDT(r.planned)) + '</td><td>' + escHtml(r.resource || '') + '</td><td>' + escHtml(r.title || '') + '</td><td>' + escHtml(r.dept || canonLabel(r.service)) + '</td><td>' + escHtml(r.status || '') + '</td><td>' + teleBucketBadge(r.unit) + '</td></tr>';
     });
     if (svc === 'ALL' || svc === 'LAUNDRY') {
       (typeof ALL_VMS !== 'undefined' ? ALL_VMS : []).filter(function (r) { return r.date === dt && (r.project || '').toUpperCase() === proj && teleIsOurLaundry(r.company); })
-        .forEach(function (r) { rows.push('<tr><td>' + escHtml(teleFmtDate(r.date)) + '</td><td>' + escHtml(r.company || '') + '</td><td>Laundry (Dima)</td><td>Laundry</td><td>—</td><td>' + escHtml(teleBucketOf(r.unit)) + '</td></tr>'); });
+        .forEach(function (r) { rows.push('<tr><td>' + escHtml(teleFmtDate(r.date)) + '</td><td>' + escHtml(r.company || '') + '</td><td>Laundry (Dima)</td><td>Laundry</td><td>—</td><td>' + teleBucketBadge(r.unit) + '</td></tr>'); });
     }
     openModal('Our visits (S & C) — ' + escHtml(pl) + ' · ' + escHtml(lbl) + ' · ' + teleFmtDate(dt),
       '<div class="drill-scroll"><table class="drill-tbl"><thead><tr><th>Date (Planned)</th><th>Resource</th><th>Work Order Title</th><th>Purpose</th><th>Status</th><th>Bucket</th></tr></thead><tbody>' + (rows.join('') || '<tr><td colspan="6" style="color:#9aa7b5;">No records</td></tr>') + '</tbody></table></div>');
   } else {
     var r2 = (typeof ALL_VMS !== 'undefined' ? ALL_VMS : []).filter(function (r) { return r.date === dt && (r.project || '').toUpperCase() === proj && !(typeof dvIsOurCompany === 'function' && dvIsOurCompany(r.company)) && !teleIsOurLaundry(r.company) && (svc === 'ALL' || canonService(r.purpose) === svc); })
-      .map(function (r) { return '<tr><td>' + escHtml(r.unit) + '</td><td>' + escHtml(r.company) + '</td><td>' + escHtml(r.purpose) + '</td><td>' + escHtml(teleBucketOf(r.unit)) + '</td></tr>'; });
+      .map(function (r) { return '<tr><td>' + escHtml(r.unit) + '</td><td>' + escHtml(r.company) + '</td><td>' + escHtml(r.purpose) + '</td><td>' + teleBucketBadge(r.unit) + '</td></tr>'; });
     openModal('Competitor visits (Other) — ' + escHtml(pl) + ' · ' + escHtml(lbl) + ' · ' + teleFmtDate(dt),
       '<div class="drill-scroll"><table class="drill-tbl"><thead><tr><th>Unit</th><th>Company</th><th>Purpose</th><th>Bucket</th></tr></thead><tbody>' + (r2.join('') || '<tr><td colspan="4" style="color:#9aa7b5;">No records</td></tr>') + '</tbody></table></div>');
   }
