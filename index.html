@@ -1815,9 +1815,8 @@ function teleBuildBucketMap() {  // GLOBAL A+/A/B/E/F per unit across ALL projec
   }
   TELE_BUCKET_MAP = map;
 }
-function teleBucketOf(u) {  // selected-project SEG_META is authoritative (incl C/D); otherwise use the global map so EVERY project shows a bucket
+function teleBucketOf(u) {  // ALWAYS use the global map -> telemetry bucket is INDEPENDENT of the header project filter (same value no matter which project is selected)
   try {
-    if (typeof SEG_META !== 'undefined' && SEG_META && SEG_META[u]) return SEG_META[u].bucket;
     if (!TELE_BUCKET_MAP) teleBuildBucketMap();
     return (TELE_BUCKET_MAP && TELE_BUCKET_MAP[u]) ? TELE_BUCKET_MAP[u] : '-';
   } catch (e) { return '-'; }
