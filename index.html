@@ -672,7 +672,7 @@
       .drill-tbl{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:6px;}
       .drill-tbl th,.drill-tbl td{border-bottom:1px solid #eef1f5;padding:5px 8px;text-align:left;}
       .drill-tbl th{background:#f4f6f9;color:#5a6b7d;font-size:11px;position:sticky;top:0;z-index:1;}
-      .drill-scroll{max-height:172px;overflow:auto;border:1px solid #eef1f5;border-radius:6px;margin-bottom:8px;}
+      .drill-scroll{max-height:300px;overflow:auto;border:1px solid #eef1f5;border-radius:6px;margin-bottom:8px;}
       .drill-scroll .drill-tbl{margin-bottom:0;}
     </style>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
@@ -1800,6 +1800,7 @@ function teleBuildBucketMap() {  // GLOBAL A+/A/B/E/F per unit across ALL projec
     if (teleIsOurLaundry(r.company)) return;
     (comp[r.unit] = comp[r.unit] || {})[canonService(r.purpose)] = 1;
   });
+  (typeof TELEMETRY_URM_ROWS !== 'undefined' ? TELEMETRY_URM_ROWS : []).forEach(function (r) { if (r && r.unit) (ours[r.unit] = ours[r.unit] || {})[r.service] = 1; }); // recent Candoo bookings (same source as the S&C drill) so our-serviced units never mis-classify as E
   if (window.DV && DV.booking && DV.booking.rows) {
     DV.booking.rows.forEach(function (b) { if (b && b.buildingUnit) (ours[b.buildingUnit] = ours[b.buildingUnit] || {})[canonService(b.woDepartment)] = 1; });
   }
@@ -1814,11 +1815,11 @@ function teleBuildBucketMap() {  // GLOBAL A+/A/B/E/F per unit across ALL projec
     else map[u] = 'F';
   }
   TELE_BUCKET_MAP = map;
-  TELE_BUCKET_STAMP = (window.DV && DV.booking && DV.booking.rows) ? DV.booking.rows.length : 0;
+  TELE_BUCKET_STAMP = ((typeof TELEMETRY_URM_ROWS !== 'undefined' ? TELEMETRY_URM_ROWS.length : 0)) + '|' + ((window.DV && DV.booking && DV.booking.rows) ? DV.booking.rows.length : 0);
 }
 function teleBucketOf(u) {  // ALWAYS use the global map -> telemetry bucket is INDEPENDENT of the header project filter (same value no matter which project is selected)
   try {
-    var cur = (window.DV && DV.booking && DV.booking.rows) ? DV.booking.rows.length : 0;
+    var cur = ((typeof TELEMETRY_URM_ROWS !== 'undefined' ? TELEMETRY_URM_ROWS.length : 0)) + '|' + ((window.DV && DV.booking && DV.booking.rows) ? DV.booking.rows.length : 0);
     if (!TELE_BUCKET_MAP || cur !== TELE_BUCKET_STAMP) teleBuildBucketMap(); // rebuild once Candoo bookings finish loading
     return (TELE_BUCKET_MAP && TELE_BUCKET_MAP[u]) ? TELE_BUCKET_MAP[u] : '-';
   } catch (e) { return '-'; }
@@ -1965,14 +1966,14 @@ function teleDrill(dt, proj, svc, which) {
     });
     bookRows.sort(function (a, b) { return (b.planned || '').localeCompare(a.planned || ''); });
     var rows = bookRows.map(function (r) {
-      return '<tr><td>' + escHtml(dvFmtDT(r.planned)) + '</td><td>' + escHtml(r.resource || '') + '</td><td>' + escHtml(r.title || '') + '</td><td>' + escHtml(r.dept || canonLabel(r.service)) + '</td><td>' + escHtml(r.status || '') + '</td><td>' + teleBucketBadge(r.unit) + '</td></tr>';
+      return '<tr><td>' + escHtml(r.unit || '') + '</td><td>' + escHtml(dvFmtDT(r.planned)) + '</td><td>' + escHtml(r.resource || '') + '</td><td>' + escHtml(r.title || '') + '</td><td>' + escHtml(r.dept || canonLabel(r.service)) + '</td><td>' + escHtml(r.status || '') + '</td><td>' + teleBucketBadge(r.unit) + '</td></tr>';
     });
     if (svc === 'ALL' || svc === 'LAUNDRY') {
       (typeof ALL_VMS !== 'undefined' ? ALL_VMS : []).filter(function (r) { return r.date === dt && (r.project || '').toUpperCase() === proj && teleIsOurLaundry(r.company); })
-        .forEach(function (r) { rows.push('<tr><td>' + escHtml(teleFmtDate(r.date)) + '</td><td>' + escHtml(r.company || '') + '</td><td>Laundry (Dima)</td><td>Laundry</td><td>—</td><td>' + teleBucketBadge(r.unit) + '</td></tr>'); });
+        .forEach(function (r) { rows.push('<tr><td>' + escHtml(r.unit || '') + '</td><td>' + escHtml(teleFmtDate(r.date)) + '</td><td>' + escHtml(r.company || '') + '</td><td>Laundry (Dima)</td><td>Laundry</td><td>—</td><td>' + teleBucketBadge(r.unit) + '</td></tr>'); });
     }
     openModal('Our visits (S & C) — ' + escHtml(pl) + ' · ' + escHtml(lbl) + ' · ' + teleFmtDate(dt),
-      '<div class="drill-scroll"><table class="drill-tbl"><thead><tr><th>Date (Planned)</th><th>Resource</th><th>Work Order Title</th><th>Purpose</th><th>Status</th><th>Bucket</th></tr></thead><tbody>' + (rows.join('') || '<tr><td colspan="6" style="color:#9aa7b5;">No records</td></tr>') + '</tbody></table></div>');
+      '<div class="drill-scroll"><table class="drill-tbl"><thead><tr><th>Building/ Unit</th><th>Date (Planned)</th><th>Resource</th><th>Work Order Title</th><th>Purpose</th><th>Status</th><th>Bucket</th></tr></thead><tbody>' + (rows.join('') || '<tr><td colspan="7" style="color:#9aa7b5;">No records</td></tr>') + '</tbody></table></div>');
   } else {
     var r2 = (typeof ALL_VMS !== 'undefined' ? ALL_VMS : []).filter(function (r) { return r.date === dt && (r.project || '').toUpperCase() === proj && !(typeof dvIsOurCompany === 'function' && dvIsOurCompany(r.company)) && !teleIsOurLaundry(r.company) && (svc === 'ALL' || canonService(r.purpose) === svc); })
       .map(function (r) { return '<tr><td>' + escHtml(r.unit) + '</td><td>' + escHtml(r.company) + '</td><td>' + escHtml(r.purpose) + '</td><td>' + teleBucketBadge(r.unit) + '</td></tr>'; });
