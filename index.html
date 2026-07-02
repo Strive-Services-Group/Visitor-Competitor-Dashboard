@@ -1791,7 +1791,7 @@ var TELE_PROJ_LBL = { 'BALQIS RESIDENCE': 'Balqis Residence', 'THE8': 'THE8', 'S
 function teleIsOurLaundry(c) { return /dima/i.test(c || ''); }  // Dima Laundry = our outsourced laundry → counts as URM
 function teleAttr(s) { return String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
 function teleFmtDate(d) { try { return new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' }).replace(',', ''); } catch (e) { return d; } }
-var TELE_BUCKET_MAP = null;
+var TELE_BUCKET_MAP = null, TELE_BUCKET_STAMP = -1;
 function teleBuildBucketMap() {  // GLOBAL A+/A/B/E/F per unit across ALL projects (competitor VMS + our Candoo bookings), independent of the header project filter
   var comp = {}, ours = {};
   (typeof ALL_VMS !== 'undefined' ? ALL_VMS : []).forEach(function (r) {
@@ -1814,10 +1814,12 @@ function teleBuildBucketMap() {  // GLOBAL A+/A/B/E/F per unit across ALL projec
     else map[u] = 'F';
   }
   TELE_BUCKET_MAP = map;
+  TELE_BUCKET_STAMP = (window.DV && DV.booking && DV.booking.rows) ? DV.booking.rows.length : 0;
 }
 function teleBucketOf(u) {  // ALWAYS use the global map -> telemetry bucket is INDEPENDENT of the header project filter (same value no matter which project is selected)
   try {
-    if (!TELE_BUCKET_MAP) teleBuildBucketMap();
+    var cur = (window.DV && DV.booking && DV.booking.rows) ? DV.booking.rows.length : 0;
+    if (!TELE_BUCKET_MAP || cur !== TELE_BUCKET_STAMP) teleBuildBucketMap(); // rebuild once Candoo bookings finish loading
     return (TELE_BUCKET_MAP && TELE_BUCKET_MAP[u]) ? TELE_BUCKET_MAP[u] : '-';
   } catch (e) { return '-'; }
 }
