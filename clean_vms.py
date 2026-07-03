@@ -5,6 +5,8 @@ def resolve(rel):
     h=glob.glob('/sessions/*/mnt/'+rel); return h[0] if h else '/sessions/current/mnt/'+rel
 SOURCES=[('BALQIS RESIDENCE',"Balqis Security's files - DAILY CONTRACTORS RECORDS/Visitors Details Balqis Residence.xlsx",None,False),
  ('THE8',"Abdul  Muqeet's files - VMS-DATA FILES/VMS-TH8.xlsx",["VMS-TH8-'26"],True),
+ ('AL HASEER',"Abdul  Muqeet's files - VMS-DATA FILES/VMS-AL HASEER.xlsx",["VMS-AL HASEER-'26"],True),
+ ('AL NABAT',"Abdul  Muqeet's files - VMS-DATA FILES/VMS-AL NABAT.xlsx",["VMS-AL NABAT-'26"],True),
  ('NORTH RESIDENCE',"VMS DATA SOUTH & NORTH/VISITOR DATA NORTH RESIDENCE - 2026.xlsx",['NORTH RESIDENCE'],False),
  ('SOUTH RESIDENCE',"VMS DATA SOUTH & NORTH/VISITOR DATA SOUTH RESIDENCE - 2026.xlsx",['SOUTH RESIDENCE'],False)]
 OUT=resolve("CRM Related/Visitor-Competitor-Dashboard/visitor.xlsx")
