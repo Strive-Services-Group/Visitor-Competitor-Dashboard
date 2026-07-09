@@ -1909,6 +1909,14 @@ async function fetchTelemetryBookings() {
       }
       wurl = wj['@odata.nextLink'] || null; wguard++;
     }
+    // De-dupe: same unit + same date + same Work Order title + same purpose = ONE visit (e.g. two handymen on one job)
+    var _seen = {}, _dd = [];
+    for (var ri = 0; ri < rows.length; ri++) {
+      var rr = rows[ri];
+      var _k = rr.date + '|' + rr.unit + '|' + (rr.title || '').trim().toUpperCase() + '|' + (rr.dept || rr.service || '').trim().toUpperCase();
+      if (_seen[_k]) continue; _seen[_k] = 1; _dd.push(rr);
+    }
+    rows = _dd;
     TELEMETRY_URM_ROWS = rows;
   } catch (e) { console.warn('[DV] telemetry bookings failed:', e.message); }
   finally { _teleLoading = false; }
