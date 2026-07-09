@@ -49,9 +49,9 @@ def clean_source(proj,rel,sheets,dedupe):
             if not row or (iD is not None and row[iD] in (None,'')): continue
             if norm(row[iP] if iP is not None else '') not in KEEP: continue
             comp=str(row[iC]).strip() if iC is not None and row[iC] is not None else ''
-            is_dima='dima' in comp.lower()
+            if 'dima' in comp.lower(): continue  # Dima excluded everywhere (our laundry comes from live work-order bookings)
             typ=str(row[iT]).strip().lower() if iT is not None and row[iT] is not None else ''
-            if not is_dima and typ!='unit visit': continue
+            if typ!='unit visit': continue
             date=parse_date(row[iD])
             if date is None: dropped+=1; continue
             pur=str(row[iP]).strip(); comp=comp.upper()

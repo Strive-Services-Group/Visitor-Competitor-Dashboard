@@ -1341,7 +1341,8 @@ function handleFile(file) {
         const row = aoa[i];
         if (!row || !row[idx.company]) continue;
         // Only keep "Unit Visit" check-ins (applied only when the column is present).
-        if (idx.type >= 0 && String(row[idx.type] || '').trim().toLowerCase() !== 'unit visit' && !/dima/i.test(String(row[idx.company] || ''))) continue;
+        if (idx.type >= 0 && String(row[idx.type] || '').trim().toLowerCase() !== 'unit visit') continue;
+        if (idx.company >= 0 && /dima/i.test(String(row[idx.company] || ''))) continue; // Dima excluded everywhere — our laundry comes from live work-order bookings
         const d = row[idx.date];
         let dateStr = '';
         if (d instanceof Date) {
@@ -1788,7 +1789,7 @@ var TELE_SVCS = ['LAUNDRY', 'HOUSEKEEP', 'MAINT', 'FITOUT'];
 var TELE_LBL = { LAUNDRY: 'Laundry', HOUSEKEEP: 'Housekeeping', MAINT: 'Maintenance/ Handyman', FITOUT: 'Fitout' };
 var TELE_PROJECTS = ['BALQIS RESIDENCE', 'THE8', 'SOUTH RESIDENCE', 'NORTH RESIDENCE', 'MAG 318', 'SHORELINE 7AND8'];
 var TELE_PROJ_LBL = { 'BALQIS RESIDENCE': 'Balqis Residence', 'THE8': 'THE8', 'SOUTH RESIDENCE': 'South Residence', 'NORTH RESIDENCE': 'North Residence', 'MAG 318': 'MAG 318', 'SHORELINE 7AND8': 'Shoreline 7AND8' };
-function teleIsOurLaundry(c) { return /dima/i.test(c || ''); }  // Dima Laundry = our outsourced laundry → counts as URM
+function teleIsOurLaundry(c) { return /dima/i.test(c || ''); }  // Dima = EXCLUDED from all counts (our laundry now comes from live work-order bookings)
 function teleAttr(s) { return String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
 function teleFmtDate(d) { try { return new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' }).replace(',', ''); } catch (e) { return d; } }
 var TELE_BUCKET_MAP = null, TELE_BUCKET_STAMP = -1;
@@ -1804,6 +1805,12 @@ function teleBuildBucketMap() {  // GLOBAL A+/A/B/E/F per unit across ALL projec
   if (window.DV && DV.booking && DV.booking.rows) {
     DV.booking.rows.forEach(function (b) { if (b && b.buildingUnit) (ours[b.buildingUnit] = ours[b.buildingUnit] || {})[canonService(b.woDepartment)] = 1; });
   }
+  if (typeof PROJECT_BOOKING_MAP !== 'undefined') { // bucket-tab booking map loads much earlier than the full DV.booking table
+    for (var pbu in PROJECT_BOOKING_MAP) {
+      var _svs = PROJECT_BOOKING_MAP[pbu] && PROJECT_BOOKING_MAP[pbu].services;
+      if (_svs && _svs.forEach) _svs.forEach(function (sv) { (ours[pbu] = ours[pbu] || {})[sv] = 1; });
+    }
+  }
   var map = {}, u, k, cs, os, hasC, hasO, overlap, units = {};
   for (u in comp) units[u] = 1; for (u in ours) units[u] = 1;
   for (u in units) {
@@ -1815,22 +1822,28 @@ function teleBuildBucketMap() {  // GLOBAL A+/A/B/E/F per unit across ALL projec
     else map[u] = 'F';
   }
   TELE_BUCKET_MAP = map;
-  TELE_BUCKET_STAMP = ((typeof TELEMETRY_URM_ROWS !== 'undefined' ? TELEMETRY_URM_ROWS.length : 0)) + '|' + ((window.DV && DV.booking && DV.booking.rows) ? DV.booking.rows.length : 0);
+  TELE_BUCKET_STAMP = ((typeof TELEMETRY_URM_ROWS !== 'undefined' ? TELEMETRY_URM_ROWS.length : 0)) + '|' + ((window.DV && DV.booking && DV.booking.rows) ? DV.booking.rows.length : 0) + '|' + ((typeof PROJECT_BOOKING_MAP !== 'undefined') ? Object.keys(PROJECT_BOOKING_MAP).length : 0);
 }
 function teleBucketOf(u) {  // ALWAYS use the global map -> telemetry bucket is INDEPENDENT of the header project filter (same value no matter which project is selected)
   try {
-    var cur = ((typeof TELEMETRY_URM_ROWS !== 'undefined' ? TELEMETRY_URM_ROWS.length : 0)) + '|' + ((window.DV && DV.booking && DV.booking.rows) ? DV.booking.rows.length : 0);
+    var cur = ((typeof TELEMETRY_URM_ROWS !== 'undefined' ? TELEMETRY_URM_ROWS.length : 0)) + '|' + ((window.DV && DV.booking && DV.booking.rows) ? DV.booking.rows.length : 0) + '|' + ((typeof PROJECT_BOOKING_MAP !== 'undefined') ? Object.keys(PROJECT_BOOKING_MAP).length : 0);
     if (!TELE_BUCKET_MAP || cur !== TELE_BUCKET_STAMP) teleBuildBucketMap(); // rebuild once Candoo bookings finish loading
     return (TELE_BUCKET_MAP && TELE_BUCKET_MAP[u]) ? TELE_BUCKET_MAP[u] : '-';
   } catch (e) { return '-'; }
 }
 function teleBucketBadge(u) {  // colored A+/A/B/C/D/E/F pill, looked up from the unit
   var b = teleBucketOf(u);
+  var bookingsReady = !!(window.DV && DV.booking && DV.booking.lastSync); // full 50k booking table done loading
+  if (!bookingsReady && (b === 'E' || b === 'F' || !b || b === '-')) return '<span title="Bucket pending — booking data still loading" style="display:inline-block;min-width:20px;text-align:center;padding:1px 8px;border-radius:10px;background:#CBD5E1;color:#475569;font-weight:700;font-size:11px;letter-spacing:.3px;">\u2026</span>';
   if (!b || b === '-') return '<span style="color:#c5cfdb;">\u2013</span>';
   var c = '#64748B';
   try { if (typeof SEG_DEFS !== 'undefined') { for (var i = 0; i < SEG_DEFS.length; i++) { if (SEG_DEFS[i].k === b) { c = SEG_DEFS[i].color; break; } } } } catch (e) {}
   return '<span style="display:inline-block;min-width:20px;text-align:center;padding:1px 8px;border-radius:10px;background:' + c + ';color:#fff;font-weight:700;font-size:11px;letter-spacing:.3px;">' + escHtml(b) + '</span>';
 }
+window.addEventListener('dv-tables-updated', function () { // once DV tables (incl. bookings) land, buckets are authoritative -> rebuild + repaint telemetry
+  TELE_BUCKET_STAMP = -1;
+  try { if (typeof renderTelemetry === 'function') renderTelemetry(); } catch (e) {}
+});
 function teleHeat(p) { // Excel-style red->yellow->green scale for Share %
   if (p == null || isNaN(p)) return '';
   p = Math.max(0, Math.min(100, p));
@@ -1867,7 +1880,9 @@ async function fetchTelemetryBookings() {
         var r = arr[i], w = r.msdyn_workorder || {};
         var stt = (r['_bookingstatus_value' + F] || '').toLowerCase(); if (stt.indexOf('cancel') >= 0) continue;
         var res = (r['_resource_value' + F] || ''); var resL = res.toLowerCase(); if (resL.indexOf('team leader') >= 0 || resL.indexOf('team member') >= 0) continue;
-        var wtype = (w['_msdyn_workordertype_value' + F] || ''); if (!/reactive/i.test(wtype)) continue; // only Reactive-Chargeable / Reactive-NonChargeable
+        var wtype = (w['_msdyn_workordertype_value' + F] || '');
+        var dept0 = (w['_ssg_department_value' + F] || '');
+        if (!/reactive/i.test(wtype) && !/laundry/i.test(dept0)) continue; // Reactive only — EXCEPT Laundry dept (our laundry = live work-order bookings of any type)
         if (!r.ssg_plannedstartdate) continue;
         var d = new Date(new Date(r.ssg_plannedstartdate).getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10);
         if (dates.indexOf(d) < 0) continue;
@@ -1898,24 +1913,22 @@ function renderTelemetry() {
   // apartments per flagship project from Locations master
   var projUnits = {};
   (typeof ALL_LOC !== 'undefined' ? ALL_LOC : []).forEach(function (l) { var p = (l.p || '').toUpperCase(); if (!p) return; (projUnits[p] = projUnits[p] || {})[l.u] = 1; });
-  // competitor (Other) and Dima (our outsourced laundry) from VMS
-  var comp = {}, dima = {}, vmsSeen = {};
+  // competitor (Other) from VMS — Dima excluded entirely
+  var comp = {}, vmsSeen = {};
   (typeof ALL_VMS !== 'undefined' ? ALL_VMS : []).forEach(function (r) {
     if (!r || dates.indexOf(r.date) < 0) return;
     var p = (r.project || '').toUpperCase(); if (TELE_PROJECTS.indexOf(p) < 0) return;
     (vmsSeen[r.date] = vmsSeen[r.date] || {})[p] = true; // competitor data exists for this project/date
     if (typeof dvIsOurCompany === 'function' && dvIsOurCompany(r.company)) return; // our staff aren't visitors
-    if (teleIsOurLaundry(r.company)) { (dima[r.date] = dima[r.date] || {}); dima[r.date][p] = (dima[r.date][p] || 0) + 1; return; }
+    if (teleIsOurLaundry(r.company)) return; // Dima excluded everywhere
     var svc = canonService(r.purpose);
     (comp[r.date] = comp[r.date] || {}); (comp[r.date][p] = comp[r.date][p] || {});
     comp[r.date][p][svc] = (comp[r.date][p][svc] || 0) + 1;
   });
-  // URM = Candoo bookings (per service). Laundry is NOT a Candoo booking service —
-  // our laundry count comes from the visitor data (company = Dima).
+  // URM = Candoo bookings per service. Laundry INCLUDED — it comes from the live work-order bookings, not Dima visitor rows.
   function urmFor(dt, p) {
     var base = ((TELEMETRY_URM || {})[dt] || {})[p] || {};
     var out = {}; for (var k in base) out[k] = base[k];
-    out.LAUNDRY = (dima[dt] || {})[p] || 0; // ours laundry = Dima rows from visitor data
     return out;
   }
   var TICON = { ALL: '👥', LAUNDRY: '🧺', HOUSEKEEP: '🧹', MAINT: '🔧', FITOUT: '🛠️' };
@@ -1927,7 +1940,7 @@ function renderTelemetry() {
   head += '</tr>';
   var body = '';
   TELE_PROJECTS.forEach(function (p, pi) {
-    var apts = Object.keys(projUnits[p] || {}).length;
+    var apts = (p === 'BALQIS RESIDENCE') ? 280 : Object.keys(projUnits[p] || {}).length; // Balqis fixed at 280 primary units (user-confirmed universe)
     dates.forEach(function (dt, di) {
       var u = urmFor(dt, p), o = (comp[dt] || {})[p] || {};
       var uAll = 0, oAll = 0, kk; for (kk in u) uAll += u[kk]; for (kk in o) oAll += o[kk];
@@ -1959,19 +1972,14 @@ function teleDrill(dt, proj, svc, which) {
   var lbl = (svc === 'ALL' ? 'All Visitors' : canonLabel(svc));
   var pl = TELE_PROJ_LBL[proj] || proj;
   if (which === 'urm') {
-    // Candoo bookings (same layout as the unit "Candoo Home Services Visits" table) + Bucket.
-    // Laundry is Dima-from-visitor-data, so exclude any booking LAUNDRY rows from ALL.
-    var bookRows = (svc === 'LAUNDRY') ? [] : (TELEMETRY_URM_ROWS || []).filter(function (r) {
-      return r.date === dt && r.project === proj && (svc === 'ALL' ? r.service !== 'LAUNDRY' : r.service === svc);
+    // Candoo bookings (same layout as the unit "Candoo Home Services Visits" table) + Bucket. Laundry included (live work-order bookings).
+    var bookRows = (TELEMETRY_URM_ROWS || []).filter(function (r) {
+      return r.date === dt && r.project === proj && (svc === 'ALL' || r.service === svc);
     });
     bookRows.sort(function (a, b) { return (b.planned || '').localeCompare(a.planned || ''); });
     var rows = bookRows.map(function (r) {
       return '<tr><td>' + escHtml(r.unit || '') + '</td><td>' + escHtml(dvFmtDT(r.planned)) + '</td><td>' + escHtml(r.resource || '') + '</td><td>' + escHtml(r.title || '') + '</td><td>' + escHtml(r.dept || canonLabel(r.service)) + '</td><td>' + escHtml(r.status || '') + '</td><td>' + teleBucketBadge(r.unit) + '</td></tr>';
     });
-    if (svc === 'ALL' || svc === 'LAUNDRY') {
-      (typeof ALL_VMS !== 'undefined' ? ALL_VMS : []).filter(function (r) { return r.date === dt && (r.project || '').toUpperCase() === proj && teleIsOurLaundry(r.company); })
-        .forEach(function (r) { rows.push('<tr><td>' + escHtml(r.unit || '') + '</td><td>' + escHtml(teleFmtDate(r.date)) + '</td><td>' + escHtml(r.company || '') + '</td><td>Laundry (Dima)</td><td>Laundry</td><td>—</td><td>' + teleBucketBadge(r.unit) + '</td></tr>'); });
-    }
     openModal('Our visits (S & C) — ' + escHtml(pl) + ' · ' + escHtml(lbl) + ' · ' + teleFmtDate(dt),
       '<div class="drill-scroll"><table class="drill-tbl"><thead><tr><th>Building/ Unit</th><th>Date (Planned)</th><th>Resource</th><th>Work Order Title</th><th>Purpose</th><th>Status</th><th>Bucket</th></tr></thead><tbody>' + (rows.join('') || '<tr><td colspan="7" style="color:#9aa7b5;">No records</td></tr>') + '</tbody></table></div>');
   } else {
@@ -1988,11 +1996,10 @@ function renderKpis() {
   const totalCompetitors = COMPETITOR_LIST.length;
   const shareOfVoice = ((scVisits/((scVisits+totalVisits)||1))*100).toFixed(1);
   const top3 = COMPETITOR_LIST.slice(0,3).reduce((s,c)=>s+c.visits,0);
-  // Last-7-days counts (S & C = bookings + Dima laundry; Competitor = VMS excl ours & Dima)
+  // Last-7-days counts (S & C = bookings only; Competitor = VMS excl ours & Dima)
   var _l7 = (typeof teleLast7Dates === 'function') ? teleLast7Dates() : [];
   var _proj = (typeof SELECTED_PROJECT !== 'undefined') ? SELECTED_PROJECT : '';
-  var sc7 = (typeof TELEMETRY_URM_ROWS !== 'undefined' ? TELEMETRY_URM_ROWS : []).filter(function (r) { return r.project === _proj && _l7.indexOf(r.date) >= 0; }).length
-          + DATA.filter(function (r) { return (typeof teleIsOurLaundry === 'function' && teleIsOurLaundry(r.company)) && _l7.indexOf(r.date) >= 0; }).length;
+  var sc7 = (typeof TELEMETRY_URM_ROWS !== 'undefined' ? TELEMETRY_URM_ROWS : []).filter(function (r) { return r.project === _proj && _l7.indexOf(r.date) >= 0; }).length;
   var comp7 = DATA.filter(function (r) { return !(typeof dvIsOurCompany === 'function' && dvIsOurCompany(r.company)) && !(typeof teleIsOurLaundry === 'function' && teleIsOurLaundry(r.company)) && _l7.indexOf(r.date) >= 0; }).length;
 
   const cards = [
