@@ -540,6 +540,7 @@
   <button class="tab-btn" data-tab="tab1" onclick="switchTab('tab1')">📊 Visitor &amp; Competitor Analysis</button>
   <div style="margin-left:auto; display:flex; align-items:center; gap:10px; font-size:12px; color:var(--muted);">
     <button class="btn" style="padding:5px 10px;font-size:12px;" onclick="exportAllBuckets()">📥 Export All Buckets</button>
+    <button id="autoSaveBtn" class="btn" style="padding:5px 10px;font-size:12px;background:#94A3B8;" onclick="toggleAutoSave()" title="Auto-publish weekly bucket history &amp; baselines to the repo (token stays in this browser only)">☁ Auto-save: Off</button>
     <span>📍 Project: <select id="projectFilter" onchange="applyProject(this.value)" style="font-weight:700;color:var(--deep-ocean);border:1px solid #cfe0ee;border-radius:7px;padding:3px 8px;font-size:13px;background:#fff;cursor:pointer;"><option value="BALQIS RESIDENCE" selected>BALQIS RESIDENCE</option></select></span>
   </div>
 </div>
@@ -632,7 +633,7 @@
         <button class="btn ghost" style="background:#94A3B8; padding:6px 10px; font-size:12px;" onclick="clearAllSnapshots()" title="Erase all stored weekly snapshots">🗑 Clear History</button>
         <button class="btn" style="padding:6px 12px; font-size:12px;" onclick="exportAllBuckets()">📥 Export All Buckets</button>
         <button class="btn" style="padding:6px 12px; font-size:12px;" onclick="exportBucketsJson()" title="Download buckets.json manually">📤 buckets.json</button>
-        <button id="autoSaveBtn" class="btn" style="padding:6px 12px; font-size:12px; background:#94A3B8;" onclick="toggleAutoSave()" title="Auto-publish: on each visitor upload, saves previous buckets as baseline and publishes the new file to the repo for everyone">☁ Auto-save: Off</button>
+        <button id="autoSaveBtnOld" class="btn" style="display:none;padding:6px 12px; font-size:12px; background:#94A3B8;" onclick="toggleAutoSave()" title="Auto-publish: on each visitor upload, saves previous buckets as baseline and publishes the new file to the repo for everyone">☁ Auto-save: Off</button>
       </div>
     </div>
   </div>
@@ -1806,7 +1807,7 @@ function teleBuildBucketMap() {  // GLOBAL A+/A/B/E/F per unit across ALL projec
   var comp = {}, ours = {};
   (typeof ALL_VMS !== 'undefined' ? ALL_VMS : []).forEach(function (r) {
     if (!r || !r.unit) return;
-    if (typeof dvIsOurCompany === 'function' && dvIsOurCompany(r.company)) return;
+    if (typeof dvIsOurCompany === 'function' && dvIsOurCompany(r.company)) { if (canonService(r.purpose) === 'FITOUT') (ours[r.unit] = ours[r.unit] || {}).FITOUT = 1; return; } // our fit-out check-ins = OURS
     if (teleIsOurLaundry(r.company)) return;
     (comp[r.unit] = comp[r.unit] || {})[canonService(r.purpose)] = 1;
   });
@@ -1849,9 +1850,12 @@ function teleBucketBadge(u) {  // colored A+/A/B/C/D/E/F pill, looked up from th
   try { if (typeof SEG_DEFS !== 'undefined') { for (var i = 0; i < SEG_DEFS.length; i++) { if (SEG_DEFS[i].k === b) { c = SEG_DEFS[i].color; break; } } } } catch (e) {}
   return '<span style="display:inline-block;min-width:20px;text-align:center;padding:1px 8px;border-radius:10px;background:' + c + ';color:#fff;font-weight:700;font-size:11px;letter-spacing:.3px;">' + escHtml(b) + '</span>';
 }
-window.addEventListener('dv-tables-updated', function () { // once DV tables (incl. bookings) land, buckets are authoritative -> rebuild + repaint telemetry
+window.addEventListener('dv-tables-updated', function () { // once DV tables (incl. bookings) land -> rebuild buckets + repaint telemetry AND the S&C charts
   TELE_BUCKET_STAMP = -1;
   try { if (typeof renderTelemetry === 'function') renderTelemetry(); } catch (e) {}
+  try { if (typeof renderKpis === 'function') renderKpis(); } catch (e) {}
+  try { if (typeof renderTopCompetitors === 'function') renderTopCompetitors(); } catch (e) {}
+  try { if (typeof renderTrend === 'function') renderTrend(); } catch (e) {}
 });
 function teleHeat(p) { // Excel-style red->yellow->green scale for Share %
   if (p == null || isNaN(p)) return '';
@@ -1891,6 +1895,7 @@ async function fetchTelemetryBookings() {
         var res = (r['_resource_value' + F] || ''); var resL = res.toLowerCase(); if (resL.indexOf('team leader') >= 0 || resL.indexOf('team member') >= 0) continue;
         var wtype = (w['_msdyn_workordertype_value' + F] || ''); if (!/reactive/i.test(wtype)) continue; // only Reactive-Chargeable / Reactive-NonChargeable
         var dept0 = (w['_ssg_department_value' + F] || ''); if (/laundry/i.test(dept0)) continue; // laundry counted directly from WORK ORDERS (below), never from bookings
+        if (canonService(dept0) === 'FITOUT') continue; // our fit-out comes from VISITOR DATA — any stray fit-out bookings are ignored
         if (!r.ssg_plannedstartdate) continue;
         var d = new Date(new Date(r.ssg_plannedstartdate).getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10);
         if (dates.indexOf(d) < 0) continue;
@@ -1946,22 +1951,26 @@ function renderTelemetry() {
   // apartments per flagship project from Locations master
   var projUnits = {};
   (typeof ALL_LOC !== 'undefined' ? ALL_LOC : []).forEach(function (l) { var p = (l.p || '').toUpperCase(); if (!p) return; (projUnits[p] = projUnits[p] || {})[l.u] = 1; });
-  // competitor (Other) from VMS — Dima excluded entirely
-  var comp = {}, vmsSeen = {};
+  // competitor (Other) from VMS — Dima excluded entirely; our FIT-OUT check-ins collected as OURS
+  var comp = {}, vmsSeen = {}, ourfit = {};
   (typeof ALL_VMS !== 'undefined' ? ALL_VMS : []).forEach(function (r) {
     if (!r || dates.indexOf(r.date) < 0) return;
     var p = (r.project || '').toUpperCase(); if (TELE_PROJECTS.indexOf(p) < 0) return;
     (vmsSeen[r.date] = vmsSeen[r.date] || {})[p] = true; // competitor data exists for this project/date
-    if (typeof dvIsOurCompany === 'function' && dvIsOurCompany(r.company)) return; // our staff aren't visitors
+    if (typeof dvIsOurCompany === 'function' && dvIsOurCompany(r.company)) { // our staff aren't competitor visitors
+      if (canonService(r.purpose) === 'FITOUT') { (ourfit[r.date] = ourfit[r.date] || {}); ourfit[r.date][p] = (ourfit[r.date][p] || 0) + 1; } // ... but our FIT-OUT check-ins ARE our visits
+      return;
+    }
     if (teleIsOurLaundry(r.company)) return; // Dima excluded everywhere
     var svc = canonService(r.purpose);
     (comp[r.date] = comp[r.date] || {}); (comp[r.date][p] = comp[r.date][p] || {});
     comp[r.date][p][svc] = (comp[r.date][p][svc] || 0) + 1;
   });
-  // URM = Candoo bookings per service. Laundry INCLUDED — it comes from the live work-order bookings, not Dima visitor rows.
+  // URM = Candoo bookings per service + laundry work orders. FIT-OUT comes from OUR OWN visitor-data check-ins (no bookings raised for fit-out).
   function urmFor(dt, p) {
     var base = ((TELEMETRY_URM || {})[dt] || {})[p] || {};
     var out = {}; for (var k in base) out[k] = base[k];
+    out.FITOUT = (ourfit[dt] || {})[p] || 0;
     return out;
   }
   var TICON = { ALL: '👥', LAUNDRY: '🧺', HOUSEKEEP: '🧹', MAINT: '🔧', FITOUT: '🛠️' };
@@ -2009,10 +2018,16 @@ function teleDrill(dt, proj, svc, which) {
     var bookRows = (TELEMETRY_URM_ROWS || []).filter(function (r) {
       return r.date === dt && r.project === proj && (svc === 'ALL' || r.service === svc);
     });
+    if (svc === 'FITOUT') bookRows = []; // fit-out never comes from bookings
+    else if (svc === 'ALL') bookRows = bookRows.filter(function (r) { return r.service !== 'FITOUT'; });
     bookRows.sort(function (a, b) { return (b.planned || '').localeCompare(a.planned || ''); });
     var rows = bookRows.map(function (r) {
       return '<tr><td>' + escHtml(r.unit || '') + '</td><td>' + escHtml(dvFmtDT(r.planned)) + '</td><td>' + escHtml(r.resource || '') + '</td><td>' + escHtml(r.title || '') + '</td><td>' + escHtml(r.dept || canonLabel(r.service)) + '</td><td>' + escHtml(r.status || '') + '</td><td>' + teleBucketBadge(r.unit) + '</td></tr>';
     });
+    if (svc === 'ALL' || svc === 'FITOUT') { // our fit-out visits come straight from the visitor data
+      (typeof ALL_VMS !== 'undefined' ? ALL_VMS : []).filter(function (r) { return r.date === dt && (r.project || '').toUpperCase() === proj && typeof dvIsOurCompany === 'function' && dvIsOurCompany(r.company) && canonService(r.purpose) === 'FITOUT'; })
+        .forEach(function (r) { rows.push('<tr><td>' + escHtml(r.unit || '') + '</td><td>' + escHtml(teleFmtDate(r.date)) + '</td><td>' + escHtml(r.company || '') + '</td><td>Fit-Out (visitor data)</td><td>' + escHtml(r.purpose || 'Fit-Out') + '</td><td>\u2014</td><td>' + teleBucketBadge(r.unit) + '</td></tr>'); });
+    }
     openModal('Our visits (S & C) — ' + escHtml(pl) + ' · ' + escHtml(lbl) + ' · ' + teleFmtDate(dt),
       '<div class="drill-scroll"><table class="drill-tbl"><thead><tr><th>Building/ Unit</th><th>Date (Planned)</th><th>Resource</th><th>Work Order Title</th><th>Purpose</th><th>Status</th><th>Bucket</th></tr></thead><tbody>' + (rows.join('') || '<tr><td colspan="7" style="color:#9aa7b5;">No records</td></tr>') + '</tbody></table></div>');
   } else {
@@ -2023,16 +2038,45 @@ function teleDrill(dt, proj, svc, which) {
   }
 }
 
+function ourFitoutRows() { // our own FIT-OUT check-ins straight from visitor data (we raise no bookings for fit-out)
+  return (typeof ALL_VMS !== 'undefined' ? ALL_VMS : []).filter(function (r) {
+    return r && typeof dvIsOurCompany === 'function' && dvIsOurCompany(r.company) && canonService(r.purpose) === 'FITOUT';
+  });
+}
+function dvBookDate(b) { try { return (b && b.starttime) ? new Date(new Date(b.starttime).getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10) : ''; } catch (e) { return ''; } }
+function ourVisitRowsForProject() { // OUR visits, selected project: deduped Candoo bookings (minus fit-out/laundry) + laundry work orders + our fit-out visitor rows — same logic as telemetry
+  var proj = (typeof SELECTED_PROJECT !== 'undefined' ? SELECTED_PROJECT : '');
+  var out = [], seen = {};
+  ((window.DV && DV.booking && DV.booking.rows) ? DV.booking.rows : []).forEach(function (b) {
+    if (!b || String(b.woProject || '').trim().toUpperCase() !== proj) return;
+    var svc = canonService(b.woDepartment);
+    if (svc === 'FITOUT' || svc === 'LAUNDRY') return;
+    var d = dvBookDate(b); if (!d) return;
+    var k = d + '|' + (b.buildingUnit || '') + '|' + String(b.woTitle || '').trim().toUpperCase() + '|' + String(b.woDepartment || '').trim().toUpperCase();
+    if (seen[k]) return; seen[k] = 1;
+    out.push({ date: d, unit: b.buildingUnit || '' });
+  });
+  ((window.DV && DV.workorder && DV.workorder.rows) ? DV.workorder.rows : []).forEach(function (w) {
+    if (!w || String(w.project || '').trim().toUpperCase() !== proj) return;
+    if (!/laundry/i.test(w.department || '') || /cancel/i.test(w.systemStatus || '') || !w.created) return;
+    out.push({ date: new Date(new Date(w.created).getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10), unit: w.buildingUnit || '' });
+  });
+  ourFitoutRows().forEach(function (r) { if ((r.project || '').toUpperCase() === proj) out.push({ date: r.date, unit: r.unit || '' }); });
+  return out;
+}
 function renderKpis() {
   const totalVisits = DATA.length;
-  const scVisits = (typeof dvOurVisitTotal === 'function') ? dvOurVisitTotal() : DATA.filter(r => r.company === MY_COMPANY).length;
+  const _projK = (typeof SELECTED_PROJECT !== 'undefined') ? SELECTED_PROJECT : '';
+  const scVisits = ((typeof dvOurVisitTotal === 'function') ? dvOurVisitTotal() : 0)
+    + ourFitoutRows().filter(function (r) { return (r.project || '').toUpperCase() === _projK; }).length; // + our fit-out check-ins from visitor data
   const totalCompetitors = COMPETITOR_LIST.length;
   const shareOfVoice = ((scVisits/((scVisits+totalVisits)||1))*100).toFixed(1);
   const top3 = COMPETITOR_LIST.slice(0,3).reduce((s,c)=>s+c.visits,0);
   // Last-7-days counts (S & C = bookings only; Competitor = VMS excl ours & Dima)
   var _l7 = (typeof teleLast7Dates === 'function') ? teleLast7Dates() : [];
   var _proj = (typeof SELECTED_PROJECT !== 'undefined') ? SELECTED_PROJECT : '';
-  var sc7 = (typeof TELEMETRY_URM_ROWS !== 'undefined' ? TELEMETRY_URM_ROWS : []).filter(function (r) { return r.project === _proj && _l7.indexOf(r.date) >= 0; }).length;
+  var sc7 = (typeof TELEMETRY_URM_ROWS !== 'undefined' ? TELEMETRY_URM_ROWS : []).filter(function (r) { return r.project === _proj && _l7.indexOf(r.date) >= 0; }).length
+          + ourFitoutRows().filter(function (r) { return (r.project || '').toUpperCase() === _proj && _l7.indexOf(r.date) >= 0; }).length;
   var comp7 = DATA.filter(function (r) { return !(typeof dvIsOurCompany === 'function' && dvIsOurCompany(r.company)) && !(typeof teleIsOurLaundry === 'function' && teleIsOurLaundry(r.company)) && _l7.indexOf(r.date) >= 0; }).length;
 
   const cards = [
@@ -2063,7 +2107,7 @@ function renderKpis() {
 ============================================================ */
 function renderTopCompetitors() {
   const top = COMPETITOR_LIST.slice(0, 10);
-  const scTotal = DATA.filter(r => r.company === MY_COMPANY).length;
+  const scTotal = (typeof ourVisitRowsForProject === 'function') ? ourVisitRowsForProject().length : 0; // S&C = bookings + laundry WOs + fit-out visitor rows
 
   // Chart: horizontal bar; insert S&C reference as first bar
   const labels = ['S & C (You)', ...top.map(c => truncate(c.company, 36))];
@@ -2133,7 +2177,8 @@ function renderTrend() {
 
   document.getElementById('trendRange').textContent = `${last10[0]}  →  ${last10[last10.length-1]}`;
 
-  const sc = last10.map(d => DATA.filter(r => r.date === d && r.company === MY_COMPANY).length);
+  const ourRows = (typeof ourVisitRowsForProject === 'function') ? ourVisitRowsForProject() : [];
+  const sc = last10.map(d => ourRows.filter(r => r.date === d).length);
   const comp = last10.map(d => DATA.filter(r => r.date === d && r.company && r.company !== MY_COMPANY).length);
   // Top 5 competitors with vibrant distinct colors (no blue tones — keeps S&C blue dominant)
   const top5 = COMPETITOR_LIST.slice(0,5);
@@ -3091,7 +3136,8 @@ async function ghPutBucketsJson(token, jsonStr, message) {
   return ghPutFile(token, 'buckets.json', btoa(unescape(encodeURIComponent(jsonStr))), message);
 }
 function ghToken() { return localStorage.getItem('vbd_gh_token'); }
-function ghAuto() { return localStorage.getItem('vbd_autosave') === '1'; }
+function ghAuto() { return localStorage.getItem('vbd_autosave') !== '0'; } // default ON — pasting a token once is enough
+try { window.addEventListener('load', function () { try { setAutoSaveBtn((ghAuto() && ghToken()) ? 'on' : 'off'); } catch (e) {} }); } catch (e) {}
 // On upload: freeze the CURRENT (pre-upload) buckets as the shared baseline, in memory + repo
 function autoPublishPre() {
   if (typeof SEG_META === 'undefined' || !Object.keys(SEG_META).length) return;
