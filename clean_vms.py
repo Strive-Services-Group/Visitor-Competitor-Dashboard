@@ -7,8 +7,8 @@ SOURCES=[('BALQIS RESIDENCE',"Balqis Security's files - DAILY CONTRACTORS RECORD
  ('THE8',"Abdul  Muqeet's files - VMS-DATA FILES/VMS-TH8.xlsx",["VMS-TH8-'26"],True),
  ('AL HASEER',"Abdul  Muqeet's files - VMS-DATA FILES/VMS-AL HASEER.xlsx",["VMS-AL HASEER-'26"],True),
  ('AL NABAT',"Abdul  Muqeet's files - VMS-DATA FILES/VMS-AL NABAT.xlsx",["VMS-AL NABAT-'26"],True),
- ('NORTH RESIDENCE',"VMS DATA SOUTH & NORTH/VISITOR DATA NORTH RESIDENCE - 2026.xlsx",['NORTH RESIDENCE'],False),
- ('SOUTH RESIDENCE',"VMS DATA SOUTH & NORTH/VISITOR DATA SOUTH RESIDENCE - 2026.xlsx",['SOUTH RESIDENCE'],False)]
+ ('NORTH RESIDENCE',"Abdul  Muqeet's files - VMS-DATA FILES/VMS-NORTH RESIDENCE.xlsx",["VMS-NORTH RESIDENCE-'26"],True),
+ ('SOUTH RESIDENCE',"Abdul  Muqeet's files - VMS-DATA FILES/VMS-SOUTH RESIDENCE.xlsx",["VMS-SOUTH RESIDENCE-'26"],True)]
 OUT=resolve("CRM Related/Visitor-Competitor-Dashboard/visitor.xlsx")
 HEADER=['Check In Date','Check In Type','Check In Purpose','Company Name','Scope of work','Building/ Unit','Project Name']
 def col(ci,*names):
@@ -67,6 +67,14 @@ def clean_source(proj,rel,sheets,dedupe):
     print('  %s: %d rows (dropped %d)'%(proj,len(out),dropped)); return out
 rows=[]
 for p,rel,s,d in SOURCES: rows+=clean_source(p,rel,s,d)
+# carry forward projects whose source is missing (e.g. SOUTH until its VMS file is uploaded)
+present=set(r[6] for r in rows)
+if 'SOUTH RESIDENCE' not in present and os.path.exists(OUT):
+    _old=openpyxl.load_workbook(OUT,read_only=True)['FINAL']
+    _it=_old.iter_rows(values_only=True); next(_it)
+    _cf=[list(r) for r in _it if r[6]=='SOUTH RESIDENCE']
+    print('  SOUTH RESIDENCE: %d rows (carried forward from previous publish)'%len(_cf))
+    rows+=_cf
 wb=openpyxl.Workbook(); ws=wb.active; ws.title='FINAL'; ws.append(HEADER)
 for r in rows: ws.append(r)
 wb.save(OUT); print('WROTE %d rows'%len(rows))
