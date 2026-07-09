@@ -1083,9 +1083,10 @@ function loadSnapshots() {
       try { all[rest.slice(sep + 1)] = JSON.parse(localStorage.getItem(k)); } catch(e) {}
     }
   }
-  // Central (buckets.json) history applies to Balqis only.
-  if (proj === 'BALQIS RESIDENCE' && typeof OPP_CENTRAL_SNAPS !== 'undefined' && OPP_CENTRAL_SNAPS) {
-    for (var _wk in OPP_CENTRAL_SNAPS) { if (!(_wk in all)) all[_wk] = OPP_CENTRAL_SNAPS[_wk]; }
+  // Central (buckets.json) history — ALL projects (repo-committed, survives browser cache clears)
+  if (typeof OPP_CENTRAL_SNAPS_ALL !== 'undefined' && OPP_CENTRAL_SNAPS_ALL && OPP_CENTRAL_SNAPS_ALL[proj]) {
+    var _c = OPP_CENTRAL_SNAPS_ALL[proj];
+    for (var _wk in _c) { if (!(_wk in all)) all[_wk] = _c[_wk]; }
   }
   return all;
 }
@@ -1093,6 +1094,14 @@ function saveSnapshot(weekKey, counts) {
   try {
     var pk = (typeof SELECTED_PROJECT !== 'undefined' ? SELECTED_PROJECT : 'ALL') + '|' + weekKey;
     localStorage.setItem(SNAPSHOT_PREFIX + pk, JSON.stringify({ counts, ts: new Date().toISOString() }));
+    // Auto-commit the week's snapshot to the repo so Last Week / Two Week survive cache clears — once per project+week
+    try {
+      if (typeof ghAuto === 'function' && ghAuto() && typeof ghToken === 'function' && ghToken() && localStorage.getItem('vbd_snap_pushed_' + pk) !== '1') {
+        ghPutBucketsJson(ghToken(), buildBucketsJsonStr(), 'Weekly bucket snapshot ' + pk)
+          .then(function () { localStorage.setItem('vbd_snap_pushed_' + pk, '1'); if (typeof toast === 'function') toast('Weekly snapshot saved to repo (' + pk + ')', 'ok'); })
+          .catch(function (e) { console.warn('snapshot publish failed', e.message); });
+      }
+    } catch (e2) {}
   } catch(e) { console.warn('localStorage failed', e); }
 }
 function clearAllSnapshots() {
@@ -3016,15 +3025,30 @@ function loadCentralSnapshots() {
       j = j || {};
       OPP_BASELINE_UNITS = (j._units && Object.keys(j._units).length) ? j._units : (function(){ try { return JSON.parse(localStorage.getItem('VBD_BASELINE')||'null') || {}; } catch(e){ return {}; } })();
       try { if (j._unitsWeek) localStorage.setItem('VBD_BASELINE_WK', j._unitsWeek); } catch(e){}
-      var snaps = {};
-      for (var k in j) { if (k.charAt(0) !== '_') snaps[k] = j[k]; }
-      OPP_CENTRAL_SNAPS = snaps;
+      var projMap = (j.projects && typeof j.projects === 'object') ? j.projects : {};
+      var legacy = {};
+      for (var k in j) { if (k.charAt(0) !== '_' && k !== 'projects') legacy[k] = j[k]; } // old flat format = Balqis-era history
+      if (Object.keys(legacy).length && !projMap['BALQIS RESIDENCE']) projMap['BALQIS RESIDENCE'] = legacy;
+      window.OPP_CENTRAL_SNAPS_ALL = projMap;                    // per-project weekly history for ALL projects
+      OPP_CENTRAL_SNAPS = projMap['BALQIS RESIDENCE'] || {};     // kept for backward compat
       try { if (typeof renderSegBuckets === 'function') renderSegBuckets(); } catch (e) {}
       try { if (typeof renderUnitMatrix === 'function') renderUnitMatrix(); } catch (e) {}
     }).catch(function () {});
 }
 function buildBucketsJsonStr() {
-  var all = (typeof loadSnapshots === 'function') ? loadSnapshots() : {};
+  // ALL projects: start from the repo's committed history, overlay every per-project snapshot in this browser
+  var projMap = {};
+  if (typeof OPP_CENTRAL_SNAPS_ALL !== 'undefined' && OPP_CENTRAL_SNAPS_ALL) {
+    for (var cp in OPP_CENTRAL_SNAPS_ALL) { projMap[cp] = {}; for (var cw in OPP_CENTRAL_SNAPS_ALL[cp]) projMap[cp][cw] = OPP_CENTRAL_SNAPS_ALL[cp][cw]; }
+  }
+  for (var li = 0; li < localStorage.length; li++) {
+    var lk = localStorage.key(li);
+    if (!lk || lk.indexOf(SNAPSHOT_PREFIX) !== 0) continue;
+    var rest = lk.slice(SNAPSHOT_PREFIX.length), sep = rest.indexOf('|');
+    if (sep < 0) continue;
+    try { (projMap[rest.slice(0, sep)] = projMap[rest.slice(0, sep)] || {})[rest.slice(sep + 1)] = JSON.parse(localStorage.getItem(lk)); } catch (e) {}
+  }
+  var all = { projects: projMap };
   var units = {};
   if (typeof SEG_META !== 'undefined') { for (var _u in SEG_META) { units[_u] = SEG_META[_u].bucket; } }
   all._units = units;
