@@ -777,10 +777,10 @@ let PROJECT_BUILDINGS = {};
 const SNAPSHOT_PREFIX = 'vbd_bucket_snapshot_';   // localStorage key prefix
 const ACTIVE_PROJECT = 'BALQIS';                    // future: make user-selectable
 const PURPOSE_BUCKETS = [
-  { key: 'MAINTENANCE/HANDYMAN', label: 'Maintenance / Handyman', match: /maintenance|handyman/i, color: '#145A95' },
-  { key: 'LAUNDRY',              label: 'Laundry',                 match: /laundry/i,             color: '#E8A33D' },
-  { key: 'CLEANING/CLEANERS',    label: 'Housekeeping / Cleaning', match: /cleaning|cleaner|housekeep/i, color: '#2E8B57' },
-  { key: 'FIT-OUT',              label: 'Fit-Out',                 match: /fit.?out/i,            color: '#8B5CF6' }
+  { key: 'MAINTENANCE/HANDYMAN', label: 'Maintenance / Handyman', match: /maintenance|handyman/i, color: '#145A95', svc: 'MAINT' },
+  { key: 'LAUNDRY',              label: 'Laundry',                 match: /laundry/i,             color: '#E8A33D', svc: 'LAUNDRY' },
+  { key: 'CLEANING/CLEANERS',    label: 'Housekeeping / Cleaning', match: /cleaning|cleaner|housekeep/i, color: '#2E8B57', svc: 'HOUSEKEEP' },
+  { key: 'FIT-OUT',              label: 'Fit-Out',                 match: /fit.?out/i,            color: '#8B5CF6', svc: 'FITOUT' }
 ];
 // Register datalabels plugin (locally per chart for control)
 if (window.ChartDataLabels) { Chart.register(window.ChartDataLabels); Chart.defaults.set('plugins.datalabels', { display:false }); }
@@ -1772,6 +1772,14 @@ function buildUnitBuckets() {
     if (r.company === MY_COMPANY) e.sc++;
     else { e.comp++; e.competitors[r.company] = (e.competitors[r.company]||0)+1; }
   }
+  // OUR side from bookings/work-orders/fit-out visitor rows (DATA no longer contains our companies)
+  if (typeof ourVisitRowsForProject === 'function') {
+    ourVisitRowsForProject().forEach(function (r) {
+      if (!r.unit) return;
+      if (!u.has(r.unit)) u.set(r.unit, { unit: r.unit, building: (r.building || String(r.unit).split('_')[0] || ''), sc: 0, comp: 0, competitors: {} });
+      u.get(r.unit).sc++;
+    });
+  }
   UNIT_BUCKETS = { our:[], shared:[], comp:[] };
   for (const v of u.values()) {
     v.topComp = Object.entries(v.competitors).sort((a,b)=>b[1]-a[1])[0]?.[0] || '—';
@@ -1850,12 +1858,17 @@ function teleBucketBadge(u) {  // colored A+/A/B/C/D/E/F pill, looked up from th
   try { if (typeof SEG_DEFS !== 'undefined') { for (var i = 0; i < SEG_DEFS.length; i++) { if (SEG_DEFS[i].k === b) { c = SEG_DEFS[i].color; break; } } } } catch (e) {}
   return '<span style="display:inline-block;min-width:20px;text-align:center;padding:1px 8px;border-radius:10px;background:' + c + ';color:#fff;font-weight:700;font-size:11px;letter-spacing:.3px;">' + escHtml(b) + '</span>';
 }
-window.addEventListener('dv-tables-updated', function () { // once DV tables (incl. bookings) land -> rebuild buckets + repaint telemetry AND the S&C charts
+window.addEventListener('dv-tables-updated', function () { // once DV tables (incl. bookings) land -> rebuild buckets + repaint EVERY S&C visual
   TELE_BUCKET_STAMP = -1;
+  try { if (typeof buildUnitBuckets === 'function') buildUnitBuckets(); } catch (e) {}
   try { if (typeof renderTelemetry === 'function') renderTelemetry(); } catch (e) {}
   try { if (typeof renderKpis === 'function') renderKpis(); } catch (e) {}
   try { if (typeof renderTopCompetitors === 'function') renderTopCompetitors(); } catch (e) {}
   try { if (typeof renderTrend === 'function') renderTrend(); } catch (e) {}
+  try { if (typeof renderPurpose === 'function') renderPurpose(); } catch (e) {}
+  try { if (typeof renderPurposeDeepDive === 'function') renderPurposeDeepDive(); } catch (e) {}
+  try { if (typeof renderUnitStack === 'function') renderUnitStack(); } catch (e) {}
+  try { if (typeof renderSharedUnits === 'function') renderSharedUnits(); } catch (e) {}
 });
 function teleHeat(p) { // Excel-style red->yellow->green scale for Share %
   if (p == null || isNaN(p)) return '';
@@ -2044,8 +2057,11 @@ function ourFitoutRows() { // our own FIT-OUT check-ins straight from visitor da
   });
 }
 function dvBookDate(b) { try { return (b && b.starttime) ? new Date(new Date(b.starttime).getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10) : ''; } catch (e) { return ''; } }
+var _OUR_ROWS_CACHE = null, _OUR_ROWS_STAMP = '';
 function ourVisitRowsForProject() { // OUR visits, selected project: deduped Candoo bookings (minus fit-out/laundry) + laundry work orders + our fit-out visitor rows — same logic as telemetry
   var proj = (typeof SELECTED_PROJECT !== 'undefined' ? SELECTED_PROJECT : '');
+  var _st = proj + '|' + ((window.DV && DV.booking && DV.booking.rows) ? DV.booking.rows.length : 0) + '|' + ((window.DV && DV.workorder && DV.workorder.rows) ? DV.workorder.rows.length : 0) + '|' + ((typeof ALL_VMS !== 'undefined') ? ALL_VMS.length : 0);
+  if (_OUR_ROWS_CACHE && _st === _OUR_ROWS_STAMP) return _OUR_ROWS_CACHE;
   var out = [], seen = {};
   ((window.DV && DV.booking && DV.booking.rows) ? DV.booking.rows : []).forEach(function (b) {
     if (!b || String(b.woProject || '').trim().toUpperCase() !== proj) return;
@@ -2054,14 +2070,15 @@ function ourVisitRowsForProject() { // OUR visits, selected project: deduped Can
     var d = dvBookDate(b); if (!d) return;
     var k = d + '|' + (b.buildingUnit || '') + '|' + String(b.woTitle || '').trim().toUpperCase() + '|' + String(b.woDepartment || '').trim().toUpperCase();
     if (seen[k]) return; seen[k] = 1;
-    out.push({ date: d, unit: b.buildingUnit || '' });
+    out.push({ date: d, unit: b.buildingUnit || '', service: svc, building: (b.woBuilding || '') });
   });
   ((window.DV && DV.workorder && DV.workorder.rows) ? DV.workorder.rows : []).forEach(function (w) {
     if (!w || String(w.project || '').trim().toUpperCase() !== proj) return;
     if (!/laundry/i.test(w.department || '') || /cancel/i.test(w.systemStatus || '') || !w.created) return;
-    out.push({ date: new Date(new Date(w.created).getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10), unit: w.buildingUnit || '' });
+    out.push({ date: new Date(new Date(w.created).getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10), unit: w.buildingUnit || '', service: 'LAUNDRY', building: (w.building || '') });
   });
-  ourFitoutRows().forEach(function (r) { if ((r.project || '').toUpperCase() === proj) out.push({ date: r.date, unit: r.unit || '' }); });
+  ourFitoutRows().forEach(function (r) { if ((r.project || '').toUpperCase() === proj) out.push({ date: r.date, unit: r.unit || '', service: 'FITOUT', building: (r.building || String(r.unit || '').split('_')[0] || '') }); });
+  _OUR_ROWS_CACHE = out; _OUR_ROWS_STAMP = _st;
   return out;
 }
 function renderKpis() {
@@ -2238,6 +2255,13 @@ function renderPurpose() {
     if (r.company === MY_COMPANY) scByP[p] = (scByP[p]||0)+1;
     else if (r.company) compByP[p] = (compByP[p]||0)+1;
   }
+  // OUR side from bookings/work-orders/fit-out rows, keyed by service label
+  if (typeof ourVisitRowsForProject === 'function') {
+    ourVisitRowsForProject().forEach(function (r) {
+      var p = String((typeof canonLabel === 'function' ? canonLabel(r.service) : r.service) || '').toUpperCase();
+      if (p) scByP[p] = (scByP[p] || 0) + 1;
+    });
+  }
   const orderedP = Object.entries(scByP).sort((a,b)=>b[1]-a[1]).map(x=>x[0]);
   // Add purposes that competitors do but S&C doesn't, for context
   for (const p of purposes) if (!orderedP.includes(p)) orderedP.push(p);
@@ -2311,7 +2335,8 @@ function renderPurposeDeepDive() {
     const vendorMap = {};
     rows.forEach(r => { if (r.company) vendorMap[r.company] = (vendorMap[r.company]||0) + 1; });
     const sorted = Object.entries(vendorMap).sort((a,b) => b[1]-a[1]);
-    const scVisits = vendorMap[MY_COMPANY] || 0;
+    const ourRowsPD = (typeof ourVisitRowsForProject === 'function' && bucket.svc) ? ourVisitRowsForProject().filter(r => r.service === bucket.svc) : [];
+    const scVisits = ourRowsPD.length;
     // All competitors (excluding S&C), top 10 for bar
     const allCompetitors = sorted.filter(([c]) => c !== MY_COMPANY);
     const topCompetitors = allCompetitors.slice(0,10);
@@ -2326,7 +2351,7 @@ function renderPurposeDeepDive() {
     const top3Competitors = allCompetitors.slice(0,3);
     const restCompetitorNames = new Set(allCompetitors.slice(3).map(([c]) => c));
 
-    const scTrend = last10.map(d => rows.filter(r => r.date === d && r.company === MY_COMPANY).length);
+    const scTrend = last10.map(d => ourRowsPD.filter(r => r.date === d).length);
     const restTrend = last10.map(d => rows.filter(r => r.date === d && restCompetitorNames.has(r.company)).length);
 
     const trendDatasets = [
