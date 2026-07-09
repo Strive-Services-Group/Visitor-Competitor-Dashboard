@@ -1880,9 +1880,8 @@ async function fetchTelemetryBookings() {
         var r = arr[i], w = r.msdyn_workorder || {};
         var stt = (r['_bookingstatus_value' + F] || '').toLowerCase(); if (stt.indexOf('cancel') >= 0) continue;
         var res = (r['_resource_value' + F] || ''); var resL = res.toLowerCase(); if (resL.indexOf('team leader') >= 0 || resL.indexOf('team member') >= 0) continue;
-        var wtype = (w['_msdyn_workordertype_value' + F] || '');
-        var dept0 = (w['_ssg_department_value' + F] || '');
-        if (!/reactive/i.test(wtype) && !/laundry/i.test(dept0)) continue; // Reactive only — EXCEPT Laundry dept (our laundry = live work-order bookings of any type)
+        var wtype = (w['_msdyn_workordertype_value' + F] || ''); if (!/reactive/i.test(wtype)) continue; // only Reactive-Chargeable / Reactive-NonChargeable
+        var dept0 = (w['_ssg_department_value' + F] || ''); if (/laundry/i.test(dept0)) continue; // laundry counted directly from WORK ORDERS (below), never from bookings
         if (!r.ssg_plannedstartdate) continue;
         var d = new Date(new Date(r.ssg_plannedstartdate).getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10);
         if (dates.indexOf(d) < 0) continue;
@@ -1892,6 +1891,23 @@ async function fetchTelemetryBookings() {
         rows.push({ date: d, project: proj, service: svc, resource: res, unit: ((w['_ssg_building_value' + F] || '').trim() + '_' + (w['_ssg_unit_value' + F] || '').trim()), planned: r.ssg_plannedstartdate, title: (w.ssg_title || ''), dept: dept, status: (r['_bookingstatus_value' + F] || ''), wtype: wtype });
       }
       url = j['@odata.nextLink'] || null; guard++;
+    }
+    // Our LAUNDRY = direct from msdyn_workorders (department "Laundry Services") — laundry jobs often carry no resource booking
+    var wurl = OPP_CRM_API_BASE + '/msdyn_workorders?$select=msdyn_name,ssg_title,createdon,msdyn_systemstatus,_ssg_building_value,_ssg_unit_value,_ssg_project_value,_ssg_department_value,_msdyn_workordertype_value&$filter=' + encodeURIComponent('_ssg_division_value eq ' + DV_DIVISION_CANDOO + ' and createdon ge ' + cut.toISOString());
+    var wguard = 0;
+    while (wurl && wguard < 80) {
+      var wj = await oppCrmGet(wurl);
+      var warr = wj.value || [];
+      for (var wi = 0; wi < warr.length; wi++) {
+        var wo = warr[wi];
+        var wdept = (wo['_ssg_department_value' + F] || ''); if (!/laundry/i.test(wdept)) continue; // department "Laundry Services"
+        var wst = (wo['msdyn_systemstatus' + F] || ''); if (/cancel/i.test(wst)) continue;
+        if (!wo.createdon) continue;
+        var wd = new Date(new Date(wo.createdon).getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10);
+        if (dates.indexOf(wd) < 0) continue;
+        rows.push({ date: wd, project: (wo['_ssg_project_value' + F] || '').trim().toUpperCase(), service: 'LAUNDRY', resource: (wo.msdyn_name || ''), unit: ((wo['_ssg_building_value' + F] || '').trim() + '_' + (wo['_ssg_unit_value' + F] || '').trim()), planned: wo.createdon, title: (wo.ssg_title || ''), dept: wdept, status: wst, wtype: (wo['_msdyn_workordertype_value' + F] || '') });
+      }
+      wurl = wj['@odata.nextLink'] || null; wguard++;
     }
     TELEMETRY_URM_ROWS = rows;
   } catch (e) { console.warn('[DV] telemetry bookings failed:', e.message); }
