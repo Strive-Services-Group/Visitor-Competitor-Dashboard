@@ -113,7 +113,7 @@
     border: 1px solid var(--line);
     border-top: 4px solid var(--steel);
     border-radius: 12px;
-    padding: 16px 18px;
+    padding: 10px 16px;
     box-shadow: var(--shadow);
     cursor: pointer;
     transition: all .2s ease;
@@ -128,9 +128,9 @@
     border-color: var(--steel);
   }
   .kpi-label { font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .4px; }
-  .kpi-value { font-size: 28px; font-weight: 800; color: var(--slate); margin-top: 6px; line-height: 1.1; }
-  .kpi-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
-  .kpi-drill { font-size: 11px; color: var(--steel); margin-top: 8px; font-weight: 600; }
+  .kpi-value { font-size: 24px; font-weight: 800; color: var(--slate); margin-top: 3px; line-height: 1.1; }
+  .kpi-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .kpi-drill { font-size: 11px; color: var(--steel); margin-top: 5px; font-weight: 600; }
 
   /* Charts grid */
   .grid-2 { display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px; }
@@ -555,7 +555,7 @@
   <div class="kpi-grid" id="kpiGrid"></div>
 
   <!-- VISITOR TELEMETRY (last 3 days, per project × service) -->
-  <div class="section-title">Visitor Telemetry — Last 3 Days &nbsp;<span style="font-size:11px;font-weight:600;color:var(--muted);text-transform:none;letter-spacing:0;">(S & C = our visits · Other = competitor · click any count to drill through)</span></div>
+  <div class="section-title" style="margin-top:14px;">Visitor Telemetry — Last 3 Days &nbsp;<span style="font-size:11px;font-weight:600;color:var(--muted);text-transform:none;letter-spacing:0;">(S & C = our visits · Other = competitor · click any count to drill through)</span></div>
   <div id="telemetryWrap"></div>
 
   <!-- TOP 10 COMPETITORS -->
@@ -1811,6 +1811,9 @@ function teleIsOurLaundry(c) { return /dima/i.test(c || ''); }  // Dima = EXCLUD
 function teleAttr(s) { return String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
 function teleFmtDate(d) { try { return new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' }).replace(',', ''); } catch (e) { return d; } }
 var TELE_BUCKET_MAP = null, TELE_BUCKET_STAMP = -1;
+var TELE_BUCKET_LS = 'vbd_tele_bucket_cache_v1';                 // last fully-loaded bucket map, persisted per browser
+var TELE_CACHED_BUCKETS = {};                                     // -> buckets render INSTANTLY on next visit (no more "..." wait)
+try { TELE_CACHED_BUCKETS = JSON.parse(localStorage.getItem(TELE_BUCKET_LS) || '{}') || {}; } catch (e) { TELE_CACHED_BUCKETS = {}; }
 function teleBuildBucketMap() {  // GLOBAL A+/A/B/E/F per unit across ALL projects (competitor VMS + our Candoo bookings), independent of the header project filter
   var comp = {}, ours = {};
   (typeof ALL_VMS !== 'undefined' ? ALL_VMS : []).forEach(function (r) {
@@ -1841,6 +1844,8 @@ function teleBuildBucketMap() {  // GLOBAL A+/A/B/E/F per unit across ALL projec
   }
   TELE_BUCKET_MAP = map;
   TELE_BUCKET_STAMP = ((typeof TELEMETRY_URM_ROWS !== 'undefined' ? TELEMETRY_URM_ROWS.length : 0)) + '|' + ((window.DV && DV.booking && DV.booking.rows) ? DV.booking.rows.length : 0) + '|' + ((typeof PROJECT_BOOKING_MAP !== 'undefined') ? Object.keys(PROJECT_BOOKING_MAP).length : 0);
+  // once the FULL booking table has landed, persist the map so future sessions render buckets instantly instead of "..."
+  try { if (window.DV && DV.booking && DV.booking.lastSync) { localStorage.setItem(TELE_BUCKET_LS, JSON.stringify(map)); TELE_CACHED_BUCKETS = map; } } catch (e) {}
 }
 function teleBucketOf(u) {  // ALWAYS use the global map -> telemetry bucket is INDEPENDENT of the header project filter (same value no matter which project is selected)
   try {
@@ -1849,14 +1854,31 @@ function teleBucketOf(u) {  // ALWAYS use the global map -> telemetry bucket is 
     return (TELE_BUCKET_MAP && TELE_BUCKET_MAP[u]) ? TELE_BUCKET_MAP[u] : '-';
   } catch (e) { return '-'; }
 }
-function teleBucketBadge(u) {  // colored A+/A/B/C/D/E/F pill, looked up from the unit
-  var b = teleBucketOf(u);
-  var bookingsReady = !!(window.DV && DV.booking && DV.booking.lastSync); // full 50k booking table done loading
-  if (!bookingsReady && (b === 'E' || b === 'F' || !b || b === '-')) return '<span title="Bucket pending — booking data still loading" style="display:inline-block;min-width:20px;text-align:center;padding:1px 8px;border-radius:10px;background:#CBD5E1;color:#475569;font-weight:700;font-size:11px;letter-spacing:.3px;">\u2026</span>';
+function teleBucketPill(b, fromCache) { // colored A+/A/B/C/D/E/F pill
   if (!b || b === '-') return '<span style="color:#c5cfdb;">\u2013</span>';
   var c = '#64748B';
   try { if (typeof SEG_DEFS !== 'undefined') { for (var i = 0; i < SEG_DEFS.length; i++) { if (SEG_DEFS[i].k === b) { c = SEG_DEFS[i].color; break; } } } } catch (e) {}
-  return '<span style="display:inline-block;min-width:20px;text-align:center;padding:1px 8px;border-radius:10px;background:' + c + ';color:#fff;font-weight:700;font-size:11px;letter-spacing:.3px;">' + escHtml(b) + '</span>';
+  return '<span' + (fromCache ? ' title="From last refresh \u2014 live booking data still loading"' : '') + ' style="display:inline-block;min-width:20px;text-align:center;padding:1px 8px;border-radius:10px;background:' + c + ';color:#fff;font-weight:700;font-size:11px;letter-spacing:.3px;">' + escHtml(b) + '</span>';
+}
+function teleBucketBadge(u) {  // wrapper carries data-unit so open drill-throughs repaint IN PLACE once live bookings land
+  var b = teleBucketOf(u);
+  var bookingsReady = !!(window.DV && DV.booking && DV.booking.lastSync); // full booking table done loading
+  var inner;
+  if (!bookingsReady && (b === 'E' || b === 'F' || !b || b === '-')) {
+    var cached = TELE_CACHED_BUCKETS && TELE_CACHED_BUCKETS[u]; // last session's bucket -> render instantly instead of "..."
+    inner = cached ? teleBucketPill(cached, true)
+                   : '<span title="Bucket pending \u2014 booking data still loading" style="display:inline-block;min-width:20px;text-align:center;padding:1px 8px;border-radius:10px;background:#CBD5E1;color:#475569;font-weight:700;font-size:11px;letter-spacing:.3px;">\u2026</span>';
+  } else inner = teleBucketPill(b, false);
+  return '<span class="tele-bkt" data-unit="' + escAttr(u || '') + '">' + inner + '</span>';
+}
+function teleRepaintBucketBadges() { // refresh every rendered bucket pill (incl. an OPEN drill-through modal) without reopening
+  try {
+    document.querySelectorAll('.tele-bkt[data-unit]').forEach(function (el) {
+      var tmp = document.createElement('span');
+      tmp.innerHTML = teleBucketBadge(el.getAttribute('data-unit'));
+      el.replaceWith(tmp.firstChild);
+    });
+  } catch (e) {}
 }
 window.addEventListener('dv-tables-updated', function () { // once DV tables (incl. bookings) land -> rebuild buckets + repaint EVERY S&C visual
   TELE_BUCKET_STAMP = -1;
@@ -1869,6 +1891,8 @@ window.addEventListener('dv-tables-updated', function () { // once DV tables (in
   try { if (typeof renderPurposeDeepDive === 'function') renderPurposeDeepDive(); } catch (e) {}
   try { if (typeof renderUnitStack === 'function') renderUnitStack(); } catch (e) {}
   try { if (typeof renderSharedUnits === 'function') renderSharedUnits(); } catch (e) {}
+  try { _OUR_ROWS_CACHE = null; } catch (e) {}
+  try { teleRepaintBucketBadges(); } catch (e) {} // live-update bucket pills in any OPEN drill-through modal
 });
 function teleHeat(p) { // Excel-style red->yellow->green scale for Share %
   if (p == null || isNaN(p)) return '';
@@ -1948,7 +1972,10 @@ async function fetchTelemetryBookings() {
   } catch (e) { console.warn('[DV] telemetry bookings failed:', e.message); }
   finally { _teleLoading = false; }
 }
-function bootTelemetry() { return fetchTelemetryBookings().then(function () { if (typeof renderTelemetry === 'function') renderTelemetry(); if (typeof renderKpis === 'function') renderKpis(); }); }
+function bootTelemetry() { return fetchTelemetryBookings().then(function () { // telemetry rows feed ourVisitRowsForProject() -> repaint EVERY S&C visual as soon as they land
+  _OUR_ROWS_CACHE = null;
+  ['renderTelemetry', 'renderKpis', 'renderTrend', 'renderTopCompetitors', 'renderPurpose', 'renderPurposeDeepDive'].forEach(function (fn) { try { if (typeof window[fn] === 'function') window[fn](); } catch (e) {} });
+}); }
 function renderTelemetry() {
   var wrap = document.getElementById('telemetryWrap'); if (!wrap) return;
   teleBuildBucketMap();
@@ -2068,28 +2095,43 @@ function ourFitoutRows() { // our own FIT-OUT check-ins straight from visitor da
     return r && typeof dvIsOurCompany === 'function' && dvIsOurCompany(r.company) && canonService(r.purpose) === 'FITOUT';
   });
 }
-function dvBookDate(b) { try { return (b && b.starttime) ? new Date(new Date(b.starttime).getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10) : ''; } catch (e) { return ''; } }
+function dvBookDate(b) { try { var t = b && (b.plannedStart || b.startDate || b.starttime); return t ? new Date(new Date(t).getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10) : ''; } catch (e) { return ''; } } // FIX: mapped booking rows store plannedStart/startDate (never .starttime) — old code returned '' for every row, zeroing ALL S&C visuals
 var _OUR_ROWS_CACHE = null, _OUR_ROWS_STAMP = '';
-function ourVisitRowsForProject() { // OUR visits, selected project: deduped Candoo bookings (minus fit-out/laundry) + laundry work orders + our fit-out visitor rows — same logic as telemetry
+function ourVisitRowsForProject() { // OUR visits, selected project — LATEST S&C conditions, identical to the telemetry table: Reactive-only bookings (deduped, cancel/Team-Leader excluded), laundry from WORK ORDERS, fit-out from OUR visitor check-ins
   var proj = (typeof SELECTED_PROJECT !== 'undefined' ? SELECTED_PROJECT : '');
-  var _st = proj + '|' + ((window.DV && DV.booking && DV.booking.rows) ? DV.booking.rows.length : 0) + '|' + ((window.DV && DV.workorder && DV.workorder.rows) ? DV.workorder.rows.length : 0) + '|' + ((typeof ALL_VMS !== 'undefined') ? ALL_VMS.length : 0);
+  var _st = proj + '|' + ((window.DV && DV.booking && DV.booking.rows) ? DV.booking.rows.length : 0) + '|' + ((window.DV && DV.workorder && DV.workorder.rows) ? DV.workorder.rows.length : 0) + '|' + ((typeof ALL_VMS !== 'undefined') ? ALL_VMS.length : 0) + '|' + ((typeof TELEMETRY_URM_ROWS !== 'undefined') ? TELEMETRY_URM_ROWS.length : 0);
   if (_OUR_ROWS_CACHE && _st === _OUR_ROWS_STAMP) return _OUR_ROWS_CACHE;
   var out = [], seen = {};
+  function addRow(d, u, svc, bld, k) { if (seen[k]) return; seen[k] = 1; out.push({ date: d, unit: u, service: svc, building: bld }); }
+  // 1) Telemetry rows FIRST (7-day window, loads in seconds, already Reactive-only + deduped) -> recent S&C shows immediately, long before the full booking table lands
+  (typeof TELEMETRY_URM_ROWS !== 'undefined' ? TELEMETRY_URM_ROWS : []).forEach(function (r) {
+    if (!r || r.project !== proj || r.service === 'FITOUT') return;
+    addRow(r.date, r.unit || '', r.service, String(r.unit || '').split('_')[0] || '',
+      r.date + '|' + (r.unit || '') + '|' + String(r.title || '').trim().toUpperCase() + '|' + String(r.dept || r.service || '').trim().toUpperCase());
+  });
+  // 2) Full booking history (older dates) — SAME latest conditions: Reactive-only, no laundry/fit-out from bookings
   ((window.DV && DV.booking && DV.booking.rows) ? DV.booking.rows : []).forEach(function (b) {
     if (!b || String(b.woProject || '').trim().toUpperCase() !== proj) return;
+    if (b.woType && !/reactive/i.test(b.woType)) return; // only Reactive-Chargeable / Reactive-NonChargeable (matches telemetry)
     var svc = canonService(b.woDepartment);
     if (svc === 'FITOUT' || svc === 'LAUNDRY') return;
     var d = dvBookDate(b); if (!d) return;
-    var k = d + '|' + (b.buildingUnit || '') + '|' + String(b.woTitle || '').trim().toUpperCase() + '|' + String(b.woDepartment || '').trim().toUpperCase();
-    if (seen[k]) return; seen[k] = 1;
-    out.push({ date: d, unit: b.buildingUnit || '', service: svc, building: (b.woBuilding || '') });
+    addRow(d, b.buildingUnit || '', svc, (b.woBuilding || ''),
+      d + '|' + (b.buildingUnit || '') + '|' + String(b.woTitle || '').trim().toUpperCase() + '|' + String(b.woDepartment || '').trim().toUpperCase());
   });
+  // 3) Our LAUNDRY = direct from work orders (department "Laundry Services"), never from bookings
   ((window.DV && DV.workorder && DV.workorder.rows) ? DV.workorder.rows : []).forEach(function (w) {
     if (!w || String(w.project || '').trim().toUpperCase() !== proj) return;
     if (!/laundry/i.test(w.department || '') || /cancel/i.test(w.systemStatus || '') || !w.created) return;
-    out.push({ date: new Date(new Date(w.created).getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10), unit: w.buildingUnit || '', service: 'LAUNDRY', building: (w.building || '') });
+    var d = new Date(new Date(w.created).getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10);
+    addRow(d, w.buildingUnit || '', 'LAUNDRY', (w.building || ''),
+      d + '|' + (w.buildingUnit || '') + '|' + String(w.title || '').trim().toUpperCase() + '|' + String(w.department || '').trim().toUpperCase());
   });
-  ourFitoutRows().forEach(function (r) { if ((r.project || '').toUpperCase() === proj) out.push({ date: r.date, unit: r.unit || '', service: 'FITOUT', building: (r.building || String(r.unit || '').split('_')[0] || '') }); });
+  // 4) Our FIT-OUT check-ins straight from visitor data (no bookings raised for fit-out; every check-in counts — same as telemetry)
+  ourFitoutRows().forEach(function (r, fi) {
+    if ((r.project || '').toUpperCase() !== proj) return;
+    addRow(r.date, r.unit || '', 'FITOUT', (r.building || String(r.unit || '').split('_')[0] || ''), 'FITOUT-VMS|' + fi);
+  });
   _OUR_ROWS_CACHE = out; _OUR_ROWS_STAMP = _st;
   return out;
 }
@@ -3692,6 +3734,7 @@ const DV_TABLES = {
       plannedStart: r.ssg_plannedstartdate || '',
       startDate: r.starttime || '',
       workOrderType: r['ssg_optionsetworkordertype' + DV_F] || '',
+      woType: w['_msdyn_workordertype_value' + DV_F] || '', // work-order type from the expanded WO (Reactive-Chargeable / Reactive-NonChargeable / PPM ...)
       resource: r['_resource_value' + DV_F] || '',
       bookingStatus: r['_bookingstatus_value' + DV_F] || '',
       workOrderId: r._msdyn_workorder_value || '',
