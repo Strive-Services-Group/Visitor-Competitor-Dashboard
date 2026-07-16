@@ -2019,7 +2019,7 @@ function renderTelemetry() {
           var pbg = '#fde8e8', pfg = '#c81e1e';
           if (pn >= 50) { pbg = '#def7ec'; pfg = '#03543f'; }
           else if (pn >= 20) { pbg = '#fdf6b2'; pfg = '#723b13'; }
-          pct = '<span style="display:inline-block;padding:3px 10px;border-radius:5px;background:' + pbg + ';color:' + pfg + ';font-weight:700;font-size:11px;">' + pn + '%</span>';
+          pct = '<span style="display:inline-block;padding:2px 10px;border-radius:5px;background:' + pbg + ';color:' + pfg + ';font-weight:700;font-size:11px;">' + pn + '%</span>';
         }
         var od = ov ? '<a href="#" onclick="teleDrill(\'' + dt + '\',\'' + teleAttr(p) + '\',\'' + svc + '\',\'other\');return false;">' + ov + '</a>' : '<span class="tzero">0</span>';
         return '<td class="tnum turm">' + ud + '</td><td class="tnum">' + od + '</td><td class="tpct">' + pct + '</td>';
@@ -3782,9 +3782,9 @@ window.DV = DV;
   @keyframes bktspin { to { transform: rotate(360deg); } }
   /* telemetry table — same design as the 9 AM telemetry email */
   .tele-tbl{border-collapse:separate;border-spacing:0;font-size:12px;border:1px solid #dbe3ec;border-radius:12px;overflow:hidden;background:#fff;}
-  .tele-tbl th,.tele-tbl td{border-bottom:1px solid #e5e9f0;border-right:1px solid #edf1f6;padding:8px 6px;text-align:center;white-space:nowrap;background:#fff;vertical-align:middle;}
-  .tele-tbl th{color:#fff;font-weight:700;font-size:12.5px;letter-spacing:.2px;border:0;padding:9px 8px;}   /* backgrounds set inline per group — no internal header borders (white hairlines) */
-  .tele-tbl th.tsub{font-size:10.5px;color:#fff;font-weight:700;padding:6px 4px;}
+  .tele-tbl th,.tele-tbl td{border-bottom:1px solid #e5e9f0;border-right:1px solid #edf1f6;padding:5px 6px;text-align:center;white-space:nowrap;background:#fff;vertical-align:middle;}
+  .tele-tbl th{color:#fff;font-weight:700;font-size:12.5px;letter-spacing:.2px;border:0;padding:7px 8px;}   /* backgrounds set inline per group — no internal header borders (white hairlines) */
+  .tele-tbl th.tsub{font-size:10.5px;color:#fff;font-weight:700;padding:4px 4px;}
   .tele-tbl td.tproj{text-align:left;padding-left:10px;font-weight:800;color:#14315E;font-size:13.5px;}
   .tele-tbl td.tapts{font-weight:800;color:#1D4ED8;font-size:15px;}
   .tele-tbl td.tdate{font-weight:700;color:#2563EB;}
