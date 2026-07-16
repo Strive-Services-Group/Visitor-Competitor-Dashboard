@@ -2033,7 +2033,7 @@ function renderTelemetry() {
   var cols = '<colgroup><col style="width:150px"><col style="width:80px"><col style="width:105px">';
   for (var ci = 0; ci < 5; ci++) cols += '<col style="width:52px"><col style="width:122px"><col style="width:72px">';
   cols += '</colgroup>';
-  wrap.innerHTML = '<div style="overflow:auto;"><table class="tele-tbl tele-grouped" style="table-layout:fixed;width:1565px;min-width:1565px;">' + cols + head + body + '</table></div>';
+  wrap.innerHTML = '<div style="overflow:auto;"><table class="tele-tbl tele-grouped" style="table-layout:fixed;width:100%;min-width:1565px;">' + cols + head + body + '</table></div>';
 }
 function teleDrill(dt, proj, svc, which) {
   var lbl = (svc === 'ALL' ? 'All Visitors' : canonLabel(svc));
