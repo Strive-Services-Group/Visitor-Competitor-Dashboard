@@ -908,11 +908,22 @@ async function fetchProjectOpps(project) {
   try {
     if (typeof oppCrmGet !== 'function') return;
     var base = OPP_CRM_API_BASE, F = '@OData.Community.Display.V1.FormattedValue';
-    var pj = await oppCrmGet(base + "/msdyn_functionallocations?$select=msdyn_functionallocationid&$filter=" + encodeURIComponent("msdyn_name eq '" + project.replace(/'/g, "''") + "'") + "&$top=1");
-    var pid = (pj.value && pj.value[0]) ? pj.value[0].msdyn_functionallocationid : null;
-    if (!pid) { OPP_DATA = {}; recomputeAll(); if (typeof toast === 'function') toast('No opportunities found for ' + project, 'warn'); return; }
+    // v-oppsunion (17 Jul 2026): query opps across ALL functional-location matches, not just the
+    // first exact-match record - South Residence has FL variants where the exact match owns ZERO
+    // opps (was silently showing no opportunities). Mirrors Pull_FanBase_Inputs.ps1.
+    var safeNm = project.replace(/'/g, "''");
+    var pj = await oppCrmGet(base + "/msdyn_functionallocations?$select=msdyn_functionallocationid&$filter=" + encodeURIComponent("msdyn_name eq '" + safeNm + "'"));
+    var pids = (pj.value || []).map(function (x) { return x.msdyn_functionallocationid; });
+    if (!pids.length) {
+      try {
+        var pj2 = await oppCrmGet(base + "/msdyn_functionallocations?$select=msdyn_functionallocationid&$filter=" + encodeURIComponent("startswith(msdyn_name,'" + safeNm + "')"));
+        pids = (pj2.value || []).map(function (x) { return x.msdyn_functionallocationid; });
+      } catch (e2) {}
+    }
+    if (!pids.length) { OPP_DATA = {}; recomputeAll(); if (typeof toast === 'function') toast('No opportunities found for ' + project, 'warn'); return; }
     var sel = "$select=ssg_textdepartment,createdon,ssg_homeservicegates,_ssg_building_value,_ssg_unit_value";
-    var u2 = base + "/opportunities?" + sel + "&$filter=" + encodeURIComponent("_ssg_communityproject_value eq " + pid);
+    var oflt = "(" + pids.map(function (g) { return "_ssg_communityproject_value eq " + g; }).join(" or ") + ")";
+    var u2 = base + "/opportunities?" + sel + "&$filter=" + encodeURIComponent(oflt);
     var recs = [], guard = 0;
     while (u2 && guard < 25) { var j = await oppCrmGet(u2); recs = recs.concat(j.value || []); u2 = j['@odata.nextLink'] || null; guard++; }
     var per = {}; OPP_RAW_BY_UNIT = {};
