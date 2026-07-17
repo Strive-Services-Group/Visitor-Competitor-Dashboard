@@ -67,14 +67,25 @@ def clean_source(proj,rel,sheets,dedupe):
     print('  %s: %d rows (dropped %d)'%(proj,len(out),dropped)); return out
 rows=[]
 for p,rel,s,d in SOURCES: rows+=clean_source(p,rel,s,d)
-# carry forward projects whose source is missing (e.g. SOUTH until its VMS file is uploaded)
-present=set(r[6] for r in rows)
-if 'SOUTH RESIDENCE' not in present and os.path.exists(OUT):
-    _old=openpyxl.load_workbook(OUT,read_only=True)['FINAL']
+# carry forward history: if a project's source now starts LATER than the published
+# history (sheet reset/truncated) or is missing entirely, keep the older published rows
+PREV=OUT
+present={}
+for r in rows: present.setdefault(r[6],[]).append(r)
+if os.path.exists(PREV):
+    _old=openpyxl.load_workbook(PREV,read_only=True)['FINAL']
     _it=_old.iter_rows(values_only=True); next(_it)
-    _cf=[list(r) for r in _it if r[6]=='SOUTH RESIDENCE']
-    print('  SOUTH RESIDENCE: %d rows (carried forward from previous publish)'%len(_cf))
-    rows+=_cf
+    oldrows={}
+    for r in _it: oldrows.setdefault(r[6],[]).append(list(r))
+    for p,orows in sorted(oldrows.items()):
+        if p not in present:
+            rows+=orows; print('  %s: %d rows carried forward (source MISSING)'%(p,len(orows)))
+            continue
+        newmin=min((r[0] for r in present[p] if r[0]),default=None)
+        oldmin=min((r[0] for r in orows if r[0]),default=None)
+        if newmin and oldmin and oldmin<newmin:
+            cf=[r for r in orows if r[0] and r[0]<newmin]
+            rows+=cf; print('  %s: %d rows carried forward (source starts %s, published %s)'%(p,len(cf),str(newmin)[:10],str(oldmin)[:10]))
 wb=openpyxl.Workbook(); ws=wb.active; ws.title='FINAL'; ws.append(HEADER)
 for r in rows: ws.append(r)
 wb.save(OUT); print('WROTE %d rows'%len(rows))

@@ -1,0 +1,80 @@
+{
+ "generatedUtc": "2026-07-17T05:21:52Z",
+ "cutoffDate": "2026-07-17",
+ "week": "2026-W29",
+ "latestVisitDate": "2026-07-16",
+ "oursSource": "d365-live",
+ "oursPulledAt": "2026-07-17T05:20:01Z",
+ "projects": {
+  "BALQIS RESIDENCE": {
+   "units": 382,
+   "buckets": {
+    "A+": 8,
+    "A": 185,
+    "B": 31,
+    "D": 10,
+    "E": 53,
+    "F": 95
+   },
+   "overlayC": 100,
+   "fans": 224,
+   "fansPct": 58.6
+  },
+  "NORTH RESIDENCE": {
+   "units": 281,
+   "buckets": {
+    "A+": 165,
+    "A": 21,
+    "B": 23,
+    "D": 9,
+    "E": 19,
+    "F": 44
+   },
+   "overlayC": 102,
+   "fans": 209,
+   "fansPct": 74.4
+  },
+  "SHORELINE 7AND8": {
+   "units": 250,
+   "buckets": {
+    "A+": 19,
+    "A": 45,
+    "B": 22,
+    "D": 27,
+    "E": 108,
+    "F": 29
+   },
+   "overlayC": 47,
+   "fans": 86,
+   "fansPct": 34.4
+  },
+  "SOUTH RESIDENCE": {
+   "units": 281,
+   "buckets": {
+    "A+": 62,
+    "A": 123,
+    "B": 42,
+    "D": 16,
+    "E": 25,
+    "F": 13
+   },
+   "overlayC": 106,
+   "fans": 227,
+   "fansPct": 80.8
+  },
+  "THE8": {
+   "units": 195,
+   "buckets": {
+    "A+": 24,
+    "A": 38,
+    "B": 14,
+    "D": 12,
+    "E": 60,
+    "F": 47
+   },
+   "overlayC": 36,
+   "fans": 76,
+   "fansPct": 39.0
+  }
+ }
+}
