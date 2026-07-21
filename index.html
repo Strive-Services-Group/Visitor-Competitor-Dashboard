@@ -643,6 +643,7 @@
     <span style="display:inline-block;width:18px;height:18px;border:3px solid #cfe0ee;border-top-color:#145A95;border-radius:50%;animation:bktspin .8s linear infinite;vertical-align:middle;margin-right:8px;"></span>Loading live bucket data…
   </div>
   <div id="bucketGrid2" class="bucket-row"></div>
+  <div id="histStatus" style="margin:8px 2px 0;font-size:11.5px;color:#5a6b7d;display:none;"></div>
 
   <div id="unitMatrixWrap" class="card">
     <style>
@@ -1106,11 +1107,17 @@ function saveSnapshot(weekKey, counts) {
   try {
     var pk = (typeof SELECTED_PROJECT !== 'undefined' ? SELECTED_PROJECT : 'ALL') + '|' + weekKey;
     localStorage.setItem(SNAPSHOT_PREFIX + pk, JSON.stringify({ counts, ts: new Date().toISOString() }));
-    // Auto-commit the week's snapshot to the repo so Last Week / Two Week survive cache clears — once per project+week
+    // mirror into the in-memory central history so the cards read it back without waiting for a repo round-trip
+    try { window.OPP_CENTRAL_SNAPS_ALL = window.OPP_CENTRAL_SNAPS_ALL || {}; (OPP_CENTRAL_SNAPS_ALL[(typeof SELECTED_PROJECT !== 'undefined' ? SELECTED_PROJECT : 'ALL')] = OPP_CENTRAL_SNAPS_ALL[(typeof SELECTED_PROJECT !== 'undefined' ? SELECTED_PROJECT : 'ALL')] || {})[weekKey] = { counts: counts, ts: new Date().toISOString() }; } catch (e3) {}
+    // Auto-commit the week's snapshot to the repo so Last Week / Two Week survive cache clears.
+    // Guard is per project+week+DAY, so the current week's snapshot keeps refreshing through the week
+    // (its final value lands by week's end) instead of freezing at the first load of the week.
     try {
-      if (typeof ghAuto === 'function' && ghAuto() && typeof ghToken === 'function' && ghToken() && localStorage.getItem('vbd_snap_pushed_' + pk) !== '1') {
-        ghPutBucketsJson(ghToken(), buildBucketsJsonStr(), 'Weekly bucket snapshot ' + pk)
-          .then(function () { localStorage.setItem('vbd_snap_pushed_' + pk, '1'); if (typeof toast === 'function') toast('Weekly snapshot saved to repo (' + pk + ')', 'ok'); })
+      var today = (typeof fmtDate === 'function') ? fmtDate(new Date()) : new Date().toISOString().slice(0, 10);
+      var guardKey = 'vbd_snap_pushed_' + pk + '_' + today;
+      if (typeof ghAuto === 'function' && ghAuto() && typeof ghToken === 'function' && ghToken() && localStorage.getItem(guardKey) !== '1') {
+        ghPutBucketsJson(ghToken(), buildBucketsJsonStr(), 'Weekly bucket snapshot ' + pk + ' (' + today + ')')
+          .then(function () { localStorage.setItem(guardKey, '1'); if (typeof toast === 'function') toast('Weekly snapshot saved to repo (' + pk + ')', 'ok'); })
           .catch(function (e) { console.warn('snapshot publish failed', e.message); });
       }
     } catch (e2) {}
@@ -1629,7 +1636,27 @@ function renderSegBuckets() {
       </div>
     </div>`;
   }).join('');
+  try { renderHistStatus(all, wkPrev, wkPrev2); } catch (e) {}
   try { if (typeof renderUnitMatrix === 'function') renderUnitMatrix(); } catch (e) {}
+}
+
+// Weekly-history save status — makes the auto-save state visible so history never silently stops.
+function renderHistStatus(all, wkPrev, wkPrev2) {
+  var el = document.getElementById('histStatus'); if (!el) return;
+  var armed = (typeof ghToken === 'function' && ghToken()) && (typeof ghAuto === 'function' ? ghAuto() : true);
+  var havePrev = all && all[wkPrev] && all[wkPrev].counts;
+  var havePrev2 = all && all[wkPrev2] && all[wkPrev2].counts;
+  el.style.display = 'block';
+  if (!armed) {
+    el.innerHTML = '⚠️ <b>Weekly history saving is OFF</b> — Last Week / Last Two Week counts and unit movement are only recorded while this is on. ' +
+      '<a href="#" onclick="toggleAutoSave();try{recomputeAll()}catch(e){};return false;" style="color:#145A95;font-weight:700;">Turn on weekly history</a> (paste a GitHub token once — stored only in this browser).';
+  } else if (!havePrev && !havePrev2) {
+    el.innerHTML = '🟢 Weekly history saving is <b>ON</b>. This week is now being recorded — Last Week fills in next week and Last Two Week the week after (past weeks weren’t recorded, so they can’t be back-filled).';
+  } else if (!havePrev || !havePrev2) {
+    el.innerHTML = '🟢 Weekly history saving is <b>ON</b>. History is building — one more week and all three columns will be populated.';
+  } else {
+    el.innerHTML = '🟢 Weekly history saving is <b>ON</b>. Last Two Week, Last Week and Current Week are all recorded.';
+  }
 }
 
 function showSegDrill(key) {
@@ -3123,6 +3150,8 @@ function loadCentralData() {
 
 var OPP_CENTRAL_SNAPS = {};
 var OPP_BASELINE_UNITS = {};
+var OPP_BASELINE_WK = '';        // ISO week stamped on the committed per-unit baseline (_unitsWeek)
+var OPP_BASELINES = {};          // per-project FROZEN weekly per-unit baseline { PROJ: { week, units:{unit:bucket} } } -> movement survives cache clears + works cross-browser
 var OPP_RAW_BY_UNIT = {};
 /* Per-project, week-locked baseline for the Unit Bucket Movement table:
    locks the per-unit buckets once (per ISO week + project, after this project's
@@ -3138,10 +3167,17 @@ function getWeekBaseline() {
     var cur = {}; for (var u in SEG_META) cur[u] = SEG_META[u].bucket;
     try { localStorage.setItem('VBD_UNITSNAP_' + proj + '_' + wkNow, JSON.stringify(cur)); } catch (e) {}
   }
-  // Baseline = last week's final per-unit snapshot (matches the cards' week-over-week view).
+  // 1) SHARED committed baseline from buckets.json (survives cache clears, same for every browser).
+  //    Only trust it for weekly movement when it's frozen for the current or immediately-previous ISO
+  //    week — an older baseline (different classification logic) would show misleading mass "movement".
+  var cbUnits = null, cbWeek = null;
+  if (typeof OPP_BASELINES !== 'undefined' && OPP_BASELINES && OPP_BASELINES[proj] && OPP_BASELINES[proj].units) { cbUnits = OPP_BASELINES[proj].units; cbWeek = OPP_BASELINES[proj].week; }
+  else if (typeof OPP_BASELINE_UNITS !== 'undefined' && OPP_BASELINE_UNITS && Object.keys(OPP_BASELINE_UNITS).length) { cbUnits = OPP_BASELINE_UNITS; cbWeek = (typeof OPP_BASELINE_WK !== 'undefined' ? OPP_BASELINE_WK : ''); }
+  if (cbUnits && Object.keys(cbUnits).length && (cbWeek === wkNow || cbWeek === wkPrev)) return cbUnits;
+  // 2) Same-browser last-week final snapshot.
   var prev = null; try { prev = JSON.parse(localStorage.getItem('VBD_UNITSNAP_' + proj + '_' + wkPrev) || 'null'); } catch (e) {}
   if (prev && Object.keys(prev).length) return prev;
-  // First week using this (no prior snapshot): lock this week's start state, reuse all week.
+  // 3) First observation this week (no valid prior baseline): lock this week's start state, reuse all week.
   var key = 'VBD_WKBASE_' + proj + '_' + wkNow;
   var b = null; try { b = JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) {}
   if (b && Object.keys(b).length) return b;
@@ -3159,6 +3195,8 @@ function loadCentralSnapshots() {
     .then(function (j) {
       j = j || {};
       OPP_BASELINE_UNITS = (j._units && Object.keys(j._units).length) ? j._units : (function(){ try { return JSON.parse(localStorage.getItem('VBD_BASELINE')||'null') || {}; } catch(e){ return {}; } })();
+      OPP_BASELINE_WK = j._unitsWeek || '';
+      OPP_BASELINES = (j._baselines && typeof j._baselines === 'object') ? j._baselines : {}; // per-project frozen weekly baseline for the movement table
       try { if (j._unitsWeek) localStorage.setItem('VBD_BASELINE_WK', j._unitsWeek); } catch(e){}
       var projMap = (j.projects && typeof j.projects === 'object') ? j.projects : {};
       var legacy = {};
@@ -3184,11 +3222,26 @@ function buildBucketsJsonStr() {
     try { (projMap[rest.slice(0, sep)] = projMap[rest.slice(0, sep)] || {})[rest.slice(sep + 1)] = JSON.parse(localStorage.getItem(lk)); } catch (e) {}
   }
   var all = { projects: projMap };
-  var units = {};
-  if (typeof SEG_META !== 'undefined') { for (var _u in SEG_META) { units[_u] = SEG_META[_u].bucket; } }
-  all._units = units;
+  var proj = (typeof SELECTED_PROJECT !== 'undefined' && SELECTED_PROJECT) ? SELECTED_PROJECT : 'ALL';
+  var wkNow = (typeof getISOWeek === 'function') ? getISOWeek(new Date()) : '';
+  // Per-project FROZEN weekly per-unit baseline: captured once at the start of each ISO week and kept
+  // frozen all week, so the Unit Bucket Movement table shows change WITHIN the current week and resets
+  // cleanly each Monday. Preserved across cache clears / other browsers because it lives in the repo.
+  var baselines = {};
+  if (typeof OPP_BASELINES !== 'undefined' && OPP_BASELINES) { for (var bp in OPP_BASELINES) baselines[bp] = OPP_BASELINES[bp]; }
+  var curUnits = {};
+  if (typeof SEG_META !== 'undefined') { for (var _u in SEG_META) curUnits[_u] = SEG_META[_u].bucket; }
+  if (Object.keys(curUnits).length) {
+    var ex = baselines[proj];
+    if (!ex || !ex.week || ex.week < wkNow) baselines[proj] = { week: wkNow, units: curUnits }; // new week (or none) -> re-freeze; same week -> keep frozen
+  }
+  OPP_BASELINES = baselines;                 // keep in-memory copy consistent with what we commit
+  all._baselines = baselines;
+  // Back-compat mirror (older readers use _units / _unitsWeek) = selected project's frozen baseline
+  var mirror = (baselines[proj] && baselines[proj].units) ? baselines[proj].units : curUnits;
+  all._units = mirror;
+  all._unitsWeek = (baselines[proj] && baselines[proj].week) ? baselines[proj].week : wkNow;
   all._unitsDate = (typeof fmtDate === 'function') ? fmtDate(new Date()) : new Date().toISOString().slice(0, 10);
-  all._unitsWeek = (typeof getISOWeek === 'function') ? getISOWeek(new Date()) : '';
   return JSON.stringify(all, null, 2);
 }
 function exportBucketsJson() {
@@ -3383,9 +3436,17 @@ function renderUnitMatrix() {
   });
   tbl.innerHTML = head + '<tbody>' + body + '</tbody>';
   var meta = document.getElementById('unitMatrixMeta');
-  if (meta) meta.innerHTML = 'Total Unit - <b>' + units.length.toLocaleString() + '</b>' +
-    '<span style="display:inline-block;width:26px;"></span>' +
-    '<b style="color:#E8A33D">' + moved.toLocaleString() + '</b> Unit Moved <span style="color:#5a6b7d;">(Current Week)</span>';
+  if (meta) {
+    var proj = (typeof SELECTED_PROJECT !== 'undefined' && SELECTED_PROJECT) ? SELECTED_PROJECT : 'ALL';
+    var baseWk = (typeof OPP_BASELINES !== 'undefined' && OPP_BASELINES[proj] && OPP_BASELINES[proj].week) ? OPP_BASELINES[proj].week
+               : (typeof OPP_BASELINE_WK !== 'undefined' ? OPP_BASELINE_WK : '');
+    var baseNote = (moved === 0)
+      ? '<span title="A fresh baseline was captured for this week; movement appears here as units change bucket. Last week / two-week movement fills in once those weeks are recorded." style="color:#9aa7b5;">(baseline set' + (baseWk ? ' ' + baseWk : '') + ' — no moves yet)</span>'
+      : '<span style="color:#5a6b7d;">(vs ' + (baseWk || 'baseline') + ')</span>';
+    meta.innerHTML = 'Total Unit - <b>' + units.length.toLocaleString() + '</b>' +
+      '<span style="display:inline-block;width:26px;"></span>' +
+      '<b style="color:#E8A33D">' + moved.toLocaleString() + '</b> Unit Moved ' + baseNote;
+  }
 }
 
 /* Helpers for the unit drill-through (4 tables). */
