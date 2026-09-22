@@ -197,6 +197,31 @@
     color: #8B2A20;
     background: #FFF1F0;
   }
+  .header .visitor-freshness {
+    margin: 6px 0 0;
+    padding: 6px 10px;
+    max-width: min(720px, 88vw);
+    border-color: rgba(255,255,255,.25);
+    border-left-color: rgba(255,255,255,.6);
+    background: rgba(255,255,255,.12);
+    color: rgba(255,255,255,.92);
+    box-shadow: none;
+  }
+  .header .visitor-freshness.ok {
+    border-left-color: #8FE3AF;
+    color: #E5F8EC;
+    background: rgba(46,139,87,.24);
+  }
+  .header .visitor-freshness.warn {
+    border-left-color: #FAC775;
+    color: #FFE7B3;
+    background: rgba(232,163,61,.22);
+  }
+  .header .visitor-freshness.bad {
+    border-left-color: #F3B8B3;
+    color: #FFD3D0;
+    background: rgba(192,57,43,.22);
+  }
   @media (prefers-color-scheme: dark) {
     .visitor-freshness {
       background: #172233;
@@ -533,12 +558,13 @@
 <div class="topfreeze">
 <div class="header">
   <div class="header-inner">
-    <div class="brand">
-      <div class="brand-logo" style="background:#fff;padding:5px 9px;display:flex;align-items:center;border-radius:8px;width:auto;"><img src="logo.png" alt="STRIVE" style="height:30px;width:auto;display:block;" onerror="this.style.display=&#39;none&#39;;this.parentNode.style.background=&#39;transparent&#39;;this.parentNode.textContent=&#39;S&amp;C&#39;;"></div>
-      <div>
-        <h1>Resident 360 / Visitor Dashboard</h1>
+      <div class="brand">
+        <div class="brand-logo" style="background:#fff;padding:5px 9px;display:flex;align-items:center;border-radius:8px;width:auto;"><img src="logo.png" alt="STRIVE" style="height:30px;width:auto;display:block;" onerror="this.style.display=&#39;none&#39;;this.parentNode.style.background=&#39;transparent&#39;;this.parentNode.textContent=&#39;S&amp;C&#39;;"></div>
+        <div>
+          <h1>Resident 360 / Visitor Dashboard</h1>
+          <div id="visitorFreshness" class="visitor-freshness">Visitor figures loading...</div>
+        </div>
       </div>
-    </div>
     <div class="header-actions" style="gap:6px; align-items:center; flex-wrap:wrap;">
       <span id="dataMeta" style="order:2;font-size:11px; opacity:.85; margin-right:6px;"></span>
       <span id="weekLiveBadge" style="order:3;display:none;font-size:11px;font-weight:700;color:#fff;background:rgba(255,255,255,.16);padding:5px 10px;border-radius:14px;"></span>
@@ -600,7 +626,6 @@
     <button class="btn" id="teleNextBtn" style="padding:5px 12px;font-size:12px;background:#618FB4;" onclick="teleShift(-1)" title="Show the next 3 days">Next 3 days ›</button>
     <span id="teleRangeLbl" style="font-size:12px;color:var(--muted);font-weight:600;"></span>
   </div>
-  <div id="visitorFreshness" class="visitor-freshness">Visitor figures loading...</div>
   <div id="telemetryWrap"></div>
 
   <!-- TOP 10 COMPETITORS -->
