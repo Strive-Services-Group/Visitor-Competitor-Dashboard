@@ -840,6 +840,7 @@ const PAL = {
 };
 const VISITOR_WORKBOOK_URL = 'https://pr-po-dashboard-proxy-b4budzexh7eveved.uaenorth-01.azurewebsites.net/api/visitor-data/visitor.xlsx';
 const VISITOR_FRESHNESS_URL = 'https://pr-po-dashboard-proxy-b4budzexh7eveved.uaenorth-01.azurewebsites.net/api/visitor-data/visitor-freshness.json';
+const BUCKETS_CENTRAL_URL = 'https://pr-po-dashboard-proxy-b4budzexh7eveved.uaenorth-01.azurewebsites.net/api/visitor-data/buckets.json';
 const VISITOR_FALLBACK_URL = 'visitor.xlsx';
 const VISITOR_STALE_MINUTES = 90;
 const MY_COMPANY = 'S & C BUILDING MAINTENANCE L.L.C';
@@ -3669,9 +3670,11 @@ function getWeekBaseline() {
   return {};
 }
 function loadCentralSnapshots() {
-  // Shared bucket history committed to the repo: weekly counts (Last Week / Last Two Week)
+  // Shared bucket history from Function storage: weekly counts (Last Week / Last Two Week)
   // plus a per-unit baseline (_units) used for day-over-day movement arrows. Same for everyone.
-  fetch('buckets.json?t=' + Date.now()).then(function (r) { if (!r.ok) throw 0; return r.json(); })
+  fetch(BUCKETS_CENTRAL_URL + '?t=' + Date.now())
+    .then(function (r) { if (!r.ok) throw 0; return r.json(); })
+    .catch(function () { return fetch('buckets.json?t=' + Date.now()).then(function (r) { if (!r.ok) throw 0; return r.json(); }); })
     .then(function (j) {
       j = j || {};
       OPP_BASELINE_UNITS = (j._units && Object.keys(j._units).length) ? j._units : (function(){ try { return JSON.parse(localStorage.getItem('VBD_BASELINE')||'null') || {}; } catch(e){ return {}; } })();
