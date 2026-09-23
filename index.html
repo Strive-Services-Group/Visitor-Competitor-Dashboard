@@ -603,8 +603,8 @@
   <button class="tab-btn" data-tab="tab1" onclick="switchTab('tab1')">📊 Visitor &amp; Competitor Analysis</button>
   <div style="margin-left:auto; display:flex; align-items:center; gap:10px; font-size:12px; color:var(--muted);">
     <button class="btn" style="padding:5px 10px;font-size:12px;" onclick="exportAllBuckets()">📥 Export All Buckets</button>
-    <button id="autoSaveBtn" class="btn" style="padding:5px 10px;font-size:12px;background:#94A3B8;" onclick="toggleAutoSave()" title="Auto-publish weekly bucket history &amp; baselines to the repo (token stays in this browser only)">☁ Auto-save: Off</button>
-    <button id="recAllBtn" class="btn" style="padding:5px 10px;font-size:12px;background:#2E8B57;" onclick="recordAllProjectsWeekly({manual:true})" title="Record THIS week's buckets for EVERY project now, so Last Week / Last Two Week build for all projects (needs Auto-save on + CRM sign-in)">☁ Record all now</button>
+    <button id="autoSaveBtn" class="btn" style="display:none;padding:5px 10px;font-size:12px;background:#94A3B8;" onclick="toggleAutoSave()" title="Weekly bucket history is published by the central Function App">☁ Central history</button>
+    <button id="recAllBtn" class="btn" style="display:none;padding:5px 10px;font-size:12px;background:#2E8B57;" onclick="recordAllProjectsWeekly({manual:true})" title="Weekly bucket history is published by the central Function App">☁ Central history</button>
     <span id="dateRangeCtl" style="display:inline-flex;align-items:center;gap:5px;" title="Filters every analysis section (KPIs, competitors, trend, deep-dive) — NOT the telemetry table below">📅 <input type="date" id="dateFrom" onchange="applyDateRange()" style="border:1px solid #cfe0ee;border-radius:7px;padding:3px 6px;font-size:12px;color:var(--deep-ocean);background:#fff;cursor:pointer;"><span style="color:var(--muted);">–</span><input type="date" id="dateTo" onchange="applyDateRange()" style="border:1px solid #cfe0ee;border-radius:7px;padding:3px 6px;font-size:12px;color:var(--deep-ocean);background:#fff;cursor:pointer;"><button class="btn" style="padding:3px 8px;font-size:11px;background:#94A3B8;" onclick="clearDateRange()" title="Clear the date range">✕</button></span>
     <span>📍 Project: <select id="projectFilter" onchange="applyProject(this.value)" style="font-weight:700;color:var(--deep-ocean);border:1px solid #cfe0ee;border-radius:7px;padding:3px 8px;font-size:13px;background:#fff;cursor:pointer;"><option value="BALQIS RESIDENCE" selected>BALQIS RESIDENCE</option></select></span>
   </div>
@@ -703,7 +703,7 @@
         <button class="btn ghost" style="background:#94A3B8; padding:6px 10px; font-size:12px;" onclick="clearAllSnapshots()" title="Erase all stored weekly snapshots">🗑 Clear History</button>
         <button class="btn" style="padding:6px 12px; font-size:12px;" onclick="exportAllBuckets()">📥 Export All Buckets</button>
         <button class="btn" style="padding:6px 12px; font-size:12px;" onclick="exportBucketsJson()" title="Download buckets.json manually">📤 buckets.json</button>
-        <button id="autoSaveBtnOld" class="btn" style="display:none;padding:6px 12px; font-size:12px; background:#94A3B8;" onclick="toggleAutoSave()" title="Auto-publish: on each visitor upload, saves previous buckets as baseline and publishes the new file to the repo for everyone">☁ Auto-save: Off</button>
+        <button id="autoSaveBtnOld" class="btn" style="display:none;padding:6px 12px; font-size:12px; background:#94A3B8;" onclick="toggleAutoSave()" title="Weekly bucket history is published by the central Function App">☁ Central history</button>
       </div>
     </div>
   </div>
@@ -1158,14 +1158,8 @@ function refreshProjectBookings() {
 ============================================================ */
 var _allSnapScheduled = false;
 function scheduleWeeklyAllSnapshot() {
-  try {
-    if (_allSnapScheduled) return;
-    if (typeof oppAccount === 'undefined' || !oppAccount) return;          // need CRM sign-in
-    if (typeof ghToken !== 'function' || !ghToken()) return;               // need saving armed
-    if (typeof ghAuto === 'function' && !ghAuto()) return;
-    _allSnapScheduled = true;
-    setTimeout(function () { try { recordAllProjectsWeekly(); } catch (e) {} }, 9000);
-  } catch (e) {}
+  // Shared weekly history is now written by the central Function App, not by browser tokens.
+  return;
 }
 // Headless twin of fetchProjectOpps: returns the per-unit opp map WITHOUT setting OPP_DATA
 // or re-rendering, so it can run in the background. Logic is 1:1 with fetchProjectOpps.
@@ -1203,67 +1197,7 @@ async function fetchProjectOppsHeadless(project) {
 }
 async function recordAllProjectsWeekly(opts) {
   opts = opts || {}; var manual = !!opts.manual;
-  try {
-    if (typeof ghToken !== 'function' || !ghToken() || (typeof ghAuto === 'function' && !ghAuto())) { if (manual && typeof toast === 'function') toast('Turn on Auto-save (paste a GitHub token) first.', 'warn'); return; }
-    if (typeof oppAccount === 'undefined' || !oppAccount) { if (manual && typeof toast === 'function') toast('Sign in to CRM first, then try again.', 'warn'); return; }
-    if (typeof classifyAt !== 'function' || typeof getISOWeek !== 'function' || typeof filterToBalqis !== 'function') return;
-    var wk = getISOWeek(new Date());
-    var guardKey = 'vbd_allproj_snap_' + wk;
-    if (!manual && localStorage.getItem(guardKey) === '1') return;          // auto: once per ISO week
-    var sel = document.getElementById('projectFilter');
-    var projects = sel ? Array.prototype.map.call(sel.options, function (o) { return o.value; }) : [];
-    if (!projects.length) return;
-    window.OPP_CENTRAL_SNAPS_ALL = window.OPP_CENTRAL_SNAPS_ALL || {};
-    var today = (typeof fmtDate === 'function') ? fmtDate(new Date()) : new Date().toISOString().slice(0, 10);
-    var filled = 0, skipped = 0;
-    if (manual && typeof toast === 'function') toast('Recording weekly buckets for all projects…', 'ok');
-    for (var pi = 0; pi < projects.length; pi++) {
-      var p = String(projects[pi] || '').toUpperCase(); if (!p) continue;
-      // Never overwrite a project already recorded this week (e.g. the one open now, saved on-view).
-      if (OPP_CENTRAL_SNAPS_ALL[p] && OPP_CENTRAL_SNAPS_ALL[p][wk]) { skipped++; continue; }
-      var cb = (typeof PROJECT_BUILDINGS !== 'undefined' && PROJECT_BUILDINGS[p]) ? PROJECT_BUILDINGS[p] : null;
-      if (!cb || !cb.size) { skipped++; continue; }
-      try {
-        // --- async fetch this project's engagement data; bookings loader sets PROJECT_BOOKING_MAP
-        //     only at its very end, which we restore in the same continuation (no await between). ---
-        var liveBK = PROJECT_BOOKING_MAP;
-        await fetchProjectBookings(p);
-        var bmap = (typeof PROJECT_BOOKING_CACHE !== 'undefined' && PROJECT_BOOKING_CACHE[p]) ? PROJECT_BOOKING_CACHE[p] : (PROJECT_BOOKING_MAP || {});
-        PROJECT_BOOKING_MAP = liveBK;
-        var omap = await fetchProjectOppsHeadless(p);
-        // --- SYNCHRONOUS block: capture the CURRENT live view, swap in p's data, classify with the
-        //     exact same classifyAt(), then restore. No await here => the UI can't observe the swap,
-        //     and restoring to freshly-captured live state means a user navigation is never clobbered. ---
-        var counts = null, hasUniverse = false;
-        (function () {
-          var lSP = SELECTED_PROJECT, lCB = CURRENT_BUILDINGS, lLOC = LOC_DATA, lDATA = DATA, lOPP = OPP_DATA, lBK = PROJECT_BOOKING_MAP;
-          try {
-            SELECTED_PROJECT = p; CURRENT_BUILDINGS = cb;
-            LOC_DATA = filterToBalqis(ALL_LOC || [], 'loc');
-            DATA = (ALL_VMS || []).filter(function (r) { return (isBalqisBuilding(r.building) || isBalqisUnit(r.unit)) && !isExcludedUnit(String(r.unit || '').toUpperCase()); }).filter(function (r) { return !(typeof dvIsOurCompany === 'function' && dvIsOurCompany(r.company)); });
-            OPP_DATA = filterToBalqis(omap, 'opp');
-            PROJECT_BOOKING_MAP = bmap;
-            hasUniverse = LOC_DATA.length > 0;
-            var res = classifyAt(today);
-            counts = {}; ['A+', 'A', 'B', 'C', 'D', 'E', 'F'].forEach(function (kk) { counts[kk] = (res.buckets[kk] || []).length; });
-          } finally {
-            SELECTED_PROJECT = lSP; CURRENT_BUILDINGS = lCB; LOC_DATA = lLOC; DATA = lDATA; OPP_DATA = lOPP; PROJECT_BOOKING_MAP = lBK;
-          }
-        })();
-        if (!counts || !hasUniverse) { skipped++; continue; }
-        (OPP_CENTRAL_SNAPS_ALL[p] = OPP_CENTRAL_SNAPS_ALL[p] || {})[wk] = { counts: counts, ts: new Date().toISOString() };
-        try { localStorage.setItem(SNAPSHOT_PREFIX + p + '|' + wk, JSON.stringify({ counts: counts, ts: new Date().toISOString() })); } catch (e) {}
-        filled++;
-      } catch (ep) { skipped++; console.warn('weekly snapshot skipped for', p, ep && ep.message); }
-    }
-    if (filled > 0) {
-      try { await ghPutBucketsJson(ghToken(), buildBucketsJsonStr(), 'Weekly all-project bucket snapshot ' + wk + ' (+' + filled + ' projects)'); }
-      catch (ec) { console.warn('all-project buckets commit failed', ec && ec.message); if (manual && typeof toast === 'function') toast('Commit failed: ' + (ec && ec.message), 'error'); return; }
-    }
-    try { localStorage.setItem(guardKey, '1'); } catch (e) {}
-    try { renderSegBuckets(); } catch (e) {}
-    if (typeof toast === 'function') toast('Weekly history recorded (+' + filled + ' project' + (filled === 1 ? '' : 's') + (skipped ? ', ' + skipped + ' already done' : '') + ').', 'ok');
-  } catch (e) { console.warn('recordAllProjectsWeekly failed', e && e.message); }
+  if (manual && typeof toast === 'function') toast('Weekly history is published by the central Function App.', 'ok');
 }
 
 /* ============================================================
@@ -1306,7 +1240,7 @@ function loadSnapshots() {
       try { all[rest.slice(sep + 1)] = JSON.parse(localStorage.getItem(k)); } catch(e) {}
     }
   }
-  // Central (buckets.json) history — ALL projects (repo-committed, survives browser cache clears)
+  // Central (buckets.json) history — ALL projects (Function storage, survives browser cache clears)
   if (typeof OPP_CENTRAL_SNAPS_ALL !== 'undefined' && OPP_CENTRAL_SNAPS_ALL && OPP_CENTRAL_SNAPS_ALL[proj]) {
     var _c = OPP_CENTRAL_SNAPS_ALL[proj];
     for (var _wk in _c) { if (!(_wk in all)) all[_wk] = _c[_wk]; }
@@ -1317,20 +1251,8 @@ function saveSnapshot(weekKey, counts) {
   try {
     var pk = (typeof SELECTED_PROJECT !== 'undefined' ? SELECTED_PROJECT : 'ALL') + '|' + weekKey;
     localStorage.setItem(SNAPSHOT_PREFIX + pk, JSON.stringify({ counts, ts: new Date().toISOString() }));
-    // mirror into the in-memory central history so the cards read it back without waiting for a repo round-trip
+    // mirror into the in-memory central history so the cards read it back immediately
     try { window.OPP_CENTRAL_SNAPS_ALL = window.OPP_CENTRAL_SNAPS_ALL || {}; (OPP_CENTRAL_SNAPS_ALL[(typeof SELECTED_PROJECT !== 'undefined' ? SELECTED_PROJECT : 'ALL')] = OPP_CENTRAL_SNAPS_ALL[(typeof SELECTED_PROJECT !== 'undefined' ? SELECTED_PROJECT : 'ALL')] || {})[weekKey] = { counts: counts, ts: new Date().toISOString() }; } catch (e3) {}
-    // Auto-commit the week's snapshot to the repo so Last Week / Two Week survive cache clears.
-    // Guard is per project+week+DAY, so the current week's snapshot keeps refreshing through the week
-    // (its final value lands by week's end) instead of freezing at the first load of the week.
-    try {
-      var today = (typeof fmtDate === 'function') ? fmtDate(new Date()) : new Date().toISOString().slice(0, 10);
-      var guardKey = 'vbd_snap_pushed_' + pk + '_' + today;
-      if (typeof ghAuto === 'function' && ghAuto() && typeof ghToken === 'function' && ghToken() && localStorage.getItem(guardKey) !== '1') {
-        ghPutBucketsJson(ghToken(), buildBucketsJsonStr(), 'Weekly bucket snapshot ' + pk + ' (' + today + ')')
-          .then(function () { localStorage.setItem(guardKey, '1'); if (typeof toast === 'function') toast('Weekly snapshot saved to repo (' + pk + ')', 'ok'); })
-          .catch(function (e) { console.warn('snapshot publish failed', e.message); });
-      }
-    } catch (e2) {}
   } catch(e) { console.warn('localStorage failed', e); }
 }
 function clearAllSnapshots() {
@@ -1988,23 +1910,7 @@ function renderSegBuckets() {
 // Weekly-history save status — makes the auto-save state visible so history never silently stops.
 function renderHistStatus(all, wkPrev, wkPrev2) {
   var el = document.getElementById('histStatus'); if (!el) return;
-  var armed = (typeof ghToken === 'function' && ghToken()) && (typeof ghAuto === 'function' ? ghAuto() : true);
-  var havePrev = all && all[wkPrev] && all[wkPrev].counts;
-  var havePrev2 = all && all[wkPrev2] && all[wkPrev2].counts;
-  // Status note hidden per request — weekly history saving still runs in the background
-  // (saveSnapshot -> ghPutBucketsJson auto-commit). Keep the box collapsed and empty.
   el.style.display = 'none'; el.innerHTML = ''; return;
-  el.style.display = 'block';
-  if (!armed) {
-    el.innerHTML = '⚠️ <b>Weekly history saving is OFF</b> — Last Week / Last Two Week counts and unit movement are only recorded while this is on. ' +
-      '<a href="#" onclick="toggleAutoSave();try{recomputeAll()}catch(e){};return false;" style="color:#145A95;font-weight:700;">Turn on weekly history</a> (paste a GitHub token once — stored only in this browser).';
-  } else if (!havePrev && !havePrev2) {
-    el.innerHTML = '🟢 Weekly history saving is <b>ON</b>. This week is now being recorded — Last Week fills in next week and Last Two Week the week after (past weeks weren’t recorded, so they can’t be back-filled).';
-  } else if (!havePrev || !havePrev2) {
-    el.innerHTML = '🟢 Weekly history saving is <b>ON</b>. History is building — one more week and all three columns will be populated.';
-  } else {
-    el.innerHTML = '🟢 Weekly history saving is <b>ON</b>. Last Two Week, Last Week and Current Week are all recorded.';
-  }
 }
 
 function showSegDrill(key) {
@@ -3692,7 +3598,7 @@ function loadCentralSnapshots() {
     }).catch(function () {});
 }
 function buildBucketsJsonStr() {
-  // ALL projects: start from the repo's committed history, overlay every per-project snapshot in this browser
+  // ALL projects: start from central history, overlay every per-project snapshot in this browser
   var projMap = {};
   if (typeof OPP_CENTRAL_SNAPS_ALL !== 'undefined' && OPP_CENTRAL_SNAPS_ALL) {
     for (var cp in OPP_CENTRAL_SNAPS_ALL) { projMap[cp] = {}; for (var cw in OPP_CENTRAL_SNAPS_ALL[cp]) projMap[cp][cw] = OPP_CENTRAL_SNAPS_ALL[cp][cw]; }
@@ -3709,7 +3615,7 @@ function buildBucketsJsonStr() {
   var wkNow = (typeof getISOWeek === 'function') ? getISOWeek(new Date()) : '';
   // Per-project FROZEN weekly per-unit baseline: captured once at the start of each ISO week and kept
   // frozen all week, so the Unit Bucket Movement table shows change WITHIN the current week and resets
-  // cleanly each Monday. Preserved across cache clears / other browsers because it lives in the repo.
+  // cleanly each Monday. Preserved across cache clears / other browsers because it lives in Function storage.
   var baselines = {};
   if (typeof OPP_BASELINES !== 'undefined' && OPP_BASELINES) { for (var bp in OPP_BASELINES) baselines[bp] = OPP_BASELINES[bp]; }
   var curUnits = {};
@@ -3733,100 +3639,35 @@ function exportBucketsJson() {
   var a = document.createElement('a');
   a.href = url; a.download = 'buckets.json'; a.click();
   URL.revokeObjectURL(url);
-  if (typeof toast === 'function') toast('Downloaded buckets.json - commit it to the repo to share', 'ok');
+  if (typeof toast === 'function') toast('Downloaded buckets.json', 'ok');
 }
 
-/* ===== Auto-commit baseline to the repo via GitHub API (token kept in this browser only) ===== */
+/* ===== Shared publishing now belongs to the central Function App. ===== */
 function setAutoSaveBtn(state) {
   var b = document.getElementById('autoSaveBtn');
   if (!b) return;
-  b.textContent = state === 'on' ? '☁ Auto-save: On' : '☁ Auto-save: Off';
-  b.style.background = state === 'on' ? '#2E8B57' : '#94A3B8';
+  b.textContent = '☁ Central history';
+  b.style.background = '#2E8B57';
 }
-async function ghPutFile(token, path, b64content, message) {
-  var owner = location.hostname.split('.')[0];
-  var parts = location.pathname.split('/').filter(Boolean);
-  var repo = parts.length ? parts[0] : '';
-  if (!owner || !repo) throw new Error('Cannot determine repo from URL (host the page first)');
-  var api = 'https://api.github.com/repos/' + owner + '/' + repo + '/contents/' + path;
-  var headers = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json' };
-  var sha = null;
-  try { var g = await fetch(api, { headers: headers }); if (g.ok) { var gj = await g.json(); sha = gj.sha; } } catch (e) {}
-  var body = { message: message || ('Update ' + path), content: b64content };
-  if (sha) body.sha = sha;
-  var r = await fetch(api, { method: 'PUT', headers: headers, body: JSON.stringify(body) });
-  if (!r.ok) { var t = ''; try { t = await r.text(); } catch (e) {} throw new Error('GitHub ' + r.status + ' ' + t.slice(0, 150)); }
-  return true;
-}
-async function ghPutBucketsJson(token, jsonStr, message) {
-  return ghPutFile(token, 'buckets.json', btoa(unescape(encodeURIComponent(jsonStr))), message);
-}
-function ghToken() { return localStorage.getItem('vbd_gh_token'); }
-function ghAuto() { return localStorage.getItem('vbd_autosave') !== '0'; } // default ON — pasting a token once is enough
-try { window.addEventListener('load', function () { try { setAutoSaveBtn((ghAuto() && ghToken()) ? 'on' : 'off'); } catch (e) {} }); } catch (e) {}
-// On upload: freeze the CURRENT (pre-upload) buckets as the shared baseline, in memory + repo
+function ghToken() { return null; }
+function ghAuto() { return false; }
+try { window.addEventListener('load', function () { try { setAutoSaveBtn('on'); } catch (e) {} }); } catch (e) {}
+// Browser uploads no longer publish shared history.
 function autoPublishPre() {
-  if (typeof SEG_META === 'undefined' || !Object.keys(SEG_META).length) return;
-  var curWeek = (typeof getISOWeek === 'function') ? getISOWeek(new Date()) : '';
-  var storedWeek = localStorage.getItem('VBD_BASELINE_WK');
-  if (storedWeek && storedWeek === curWeek) return;   // keep this week's baseline so movement persists all week
-  var units = {}; for (var u in SEG_META) units[u] = SEG_META[u].bucket;
-  OPP_BASELINE_UNITS = units;
-  try { localStorage.setItem('VBD_BASELINE', JSON.stringify(units)); localStorage.setItem('VBD_BASELINE_WK', curWeek); } catch (e) {}
-  if (ghAuto() && ghToken()) {
-    ghPutBucketsJson(ghToken(), buildBucketsJsonStr(), 'Week baseline ' + curWeek)
-      .then(function () { if (typeof toast === 'function') toast('Week baseline saved \u2014 movement persists all week', 'ok'); })
-      .catch(function (e) { console.warn('baseline publish failed', e.message); });
-  }
+  return;
 }
-// Publish an uploaded data file to the repo so all colleagues get it on refresh
+// Browser uploads no longer publish shared files.
 function autoPublishDataFile(file, path) {
-  if (!ghAuto() || !ghToken() || !file) return;
-  var reader = new FileReader();
-  reader.onload = function () {
-    var b64 = (String(reader.result).split(',')[1]) || '';
-    ghPutFile(ghToken(), path, b64, 'Publish ' + path + ' ' + new Date().toISOString())
-      .then(function () { if (typeof toast === 'function') toast(path + ' published — colleagues see it on refresh', 'ok'); })
-      .catch(function (e) { if (typeof toast === 'function') toast('Publish failed: ' + (e.message || e), 'error'); });
-  };
-  reader.readAsDataURL(file);
+  return;
 }
 function autoPublishVisitor(file) { autoPublishDataFile(file, 'visitor.xlsx'); }
 function autoPublishLoc(file) { autoPublishDataFile(file, 'locations.xlsx'); }
 async function autoSaveBaselineIfDue(force) {
-  var token = localStorage.getItem('vbd_gh_token');
-  var on = localStorage.getItem('vbd_autosave') === '1';
-  if (!token || (!on && !force)) return;
-  if (typeof SEG_META === 'undefined' || !Object.keys(SEG_META).length) return;
-  var today = (typeof fmtDate === 'function') ? fmtDate(new Date()) : new Date().toISOString().slice(0, 10);
-  if (!force && localStorage.getItem('vbd_baseline_date') === today) return;
-  try {
-    await ghPutBucketsJson(token, buildBucketsJsonStr(), 'Auto baseline ' + today);
-    localStorage.setItem('vbd_baseline_date', today);
-    setAutoSaveBtn('on');
-    if (typeof toast === 'function') toast('Baseline auto-saved to repo (' + today + ')', 'ok');
-  } catch (e) {
-    console.warn('Auto-save failed:', e.message);
-    if (typeof toast === 'function') toast('Auto-save failed: ' + (e.message || e), 'error');
-  }
+  return;
 }
 function toggleAutoSave() {
-  var on = localStorage.getItem('vbd_autosave') === '1';
-  if (on) {
-    localStorage.setItem('vbd_autosave', '0');
-    setAutoSaveBtn('off');
-    if (typeof toast === 'function') toast('Auto-publish turned off', 'ok');
-    return;
-  }
-  var token = localStorage.getItem('vbd_gh_token');
-  if (!token) {
-    token = prompt('Paste a GitHub fine-grained token (Contents: Read & write for this repo).\nStored only in THIS browser, never in the repo.');
-    if (!token) return;
-    localStorage.setItem('vbd_gh_token', token.trim());
-  }
-  localStorage.setItem('vbd_autosave', '1');
   setAutoSaveBtn('on');
-  if (typeof toast === 'function') toast('Auto-publish ON. Next visitor upload publishes to everyone and saves the previous buckets as baseline.', 'ok');
+  if (typeof toast === 'function') toast('Weekly history is published by the central Function App.', 'ok');
 }
 
 /* Occupancy (Contact Location / ssg_occupancytracker) lookup for the matrix.
