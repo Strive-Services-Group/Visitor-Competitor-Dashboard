@@ -841,7 +841,7 @@ const PAL = {
 const VISITOR_WORKBOOK_URL = 'https://pr-po-dashboard-proxy-b4budzexh7eveved.uaenorth-01.azurewebsites.net/api/visitor-data/visitor.xlsx';
 const VISITOR_FRESHNESS_URL = 'https://pr-po-dashboard-proxy-b4budzexh7eveved.uaenorth-01.azurewebsites.net/api/visitor-data/visitor-freshness.json';
 const BUCKETS_CENTRAL_URL = 'https://pr-po-dashboard-proxy-b4budzexh7eveved.uaenorth-01.azurewebsites.net/api/visitor-data/buckets.json';
-const VISITOR_FALLBACK_URL = 'visitor.xlsx';
+const LOCATIONS_URL = 'https://pr-po-dashboard-proxy-b4budzexh7eveved.uaenorth-01.azurewebsites.net/api/visitor-data/locations.json';
 const VISITOR_STALE_MINUTES = 90;
 const MY_COMPANY = 'S & C BUILDING MAINTENANCE L.L.C';
 const BALQIS_BUILDINGS = new Set(['BALQIS BLOCK A','BALQIS BLOCK B','BALQIS BLOCK C','BALQIS VILLAS']);
@@ -896,22 +896,15 @@ window.addEventListener('DOMContentLoaded', () => {
   initSplash();
   setupUpload();
   setupFilters();
-  try {
-    var _sl = JSON.parse(localStorage.getItem('VBD_LOC_DATA')||'null');
-    if (_sl && _sl.recs) { LOC_DATA = filterToBalqis(_sl.recs,'loc'); document.getElementById('locLastLoaded').textContent = _sl.name||'Saved'; }
-    else { LOC_DATA = filterToBalqis(EMBEDDED_LOCATIONS || [], 'loc'); document.getElementById('locLastLoaded').textContent = 'Embedded'; }
-  } catch(e){ LOC_DATA = filterToBalqis(EMBEDDED_LOCATIONS || [], 'loc'); document.getElementById('locLastLoaded').textContent = 'Embedded'; }
+  LOC_DATA = filterToBalqis(EMBEDDED_LOCATIONS || [], 'loc');
+  document.getElementById('locLastLoaded').textContent = 'Sign in';
   OPP_DATA = filterToBalqis(EMBEDDED_OPPS || {}, 'opp');
   document.getElementById('locRecordCount').textContent = LOC_DATA.length.toLocaleString();
   document.getElementById('oppLastLoaded').textContent = 'Embedded';
   document.getElementById('oppRecordCount').textContent = Object.values(OPP_DATA).reduce((s,e)=>s+(e.t||0),0).toLocaleString();
-  try {
-    var _sv = JSON.parse(localStorage.getItem('VBD_VMS_DATA')||'null');
-    if (_sv && _sv.recs) { loadData(filterToBalqis(_sv.recs,'vms'), _sv.name||'Saved'); }
-    else { loadData(filterToBalqis(EMBEDDED_DATA, 'vms'), 'Embedded snapshot'); }
-  } catch(e){ loadData(filterToBalqis(EMBEDDED_DATA, 'vms'), 'Embedded snapshot'); }
-  try { ALL_LOC = (function(){ var s=null; try{s=JSON.parse(localStorage.getItem('VBD_LOC_DATA')||'null');}catch(e){} return (s&&s.recs)?s.recs:(EMBEDDED_LOCATIONS||[]); })(); buildProjectMap(); } catch(e){}
-  try { ALL_VMS = (function(){ var s=null; try{s=JSON.parse(localStorage.getItem('VBD_VMS_DATA')||'null');}catch(e){} return (s&&s.recs)?s.recs:(EMBEDDED_DATA||[]); })(); } catch(e){}
+  loadData(filterToBalqis(EMBEDDED_DATA, 'vms'), 'Sign in');
+  try { ALL_LOC = EMBEDDED_LOCATIONS || []; buildProjectMap(); } catch(e){}
+  ALL_VMS = EMBEDDED_DATA || [];
     loadCentralData();
   loadCentralSnapshots();
   try { switchTab((!IS_EMBED && (location.hash === '#visitor' || location.hash === '#telemetry')) ? 'tab1' : 'tab2'); } catch(e){}
@@ -3498,8 +3491,36 @@ function renderVisitorFreshness(info, sourceLabel) {
     setVisitorFreshness('ok', 'Visitor figures refreshed ' + stamp + ' Dubai (' + ageMinutes + ' minutes ago)' + countText + '.');
   }
 }
+function fetchWithVisitorToken(url) {
+  if (!oppCrmToken) return Promise.reject(new Error('sign-in required'));
+  return fetch(url, { cache: 'no-store', headers: { Authorization: 'Bearer ' + oppCrmToken } }).then(function (r) {
+    if (r.status !== 401) return r;
+    oppCrmToken = null;
+    return acquireOppCrmToken().then(function (fresh) {
+      return fetch(url, { cache: 'no-store', headers: { Authorization: 'Bearer ' + fresh } });
+    });
+  });
+}
+function applySignedInLocations(arr) {
+  var locs = [];
+  var seen = {};
+  (arr || []).forEach(function (row) {
+    var u = String(row && row.u || '').trim();
+    if (!u || seen[u]) return;
+    seen[u] = 1;
+    locs.push({ u: u, b: String(row.b || '').trim(), p: String(row.p || '').trim(), f: String(row.f || '').trim() });
+  });
+  ALL_LOC = locs;
+  if (typeof buildProjectMap === 'function') buildProjectMap();
+  var balqisLocs = (typeof filterToBalqis === 'function') ? filterToBalqis(locs, 'loc') : locs;
+  LOC_DATA = balqisLocs;
+  var nameEl = document.getElementById('locLastLoaded');
+  if (nameEl) nameEl.textContent = 'Signed-in';
+  var countEl = document.getElementById('locRecordCount');
+  if (countEl) countEl.textContent = balqisLocs.length.toLocaleString();
+}
 function loadVisitorFreshness(sourceLabel) {
-  fetch(VISITOR_FRESHNESS_URL + '?t=' + Date.now()).then(function (r) {
+  fetchWithVisitorToken(VISITOR_FRESHNESS_URL + '?t=' + Date.now()).then(function (r) {
     if (!r.ok) throw new Error('freshness ' + r.status);
     return r.json();
   }).then(function (j) {
@@ -3510,29 +3531,26 @@ function loadVisitorFreshness(sourceLabel) {
 }
 function fetchVisitorWorkbookBlob() {
   var bust = '?t=' + Date.now();
-  return fetch(VISITOR_WORKBOOK_URL + bust).then(function (r) {
+  return fetchWithVisitorToken(VISITOR_WORKBOOK_URL + bust).then(function (r) {
     if (!r.ok) throw new Error('visitor function endpoint ' + r.status);
     return r.blob().then(function (b) { return { blob: b, source: 'Function App storage' }; });
-  }).catch(function () {
-    return fetch(VISITOR_FALLBACK_URL + bust).then(function (r) {
-      if (!r.ok) throw new Error('visitor fallback ' + r.status);
-      return r.blob().then(function (b) { return { blob: b, source: 'GitHub Pages fallback' }; });
-    });
   });
 }
 function loadCentralData() {
-  // Shared datasets override per-browser uploads, so one central update shows
-  // the latest data to everyone. Cache-busted to always get latest.
+  if (!oppCrmToken) return;
   var bust = '?t=' + Date.now();
-  fetch('locations.xlsx' + bust).then(function (r) { if (!r.ok) throw 0; return r.blob(); })
-    .then(function (b) { try { var _f=new File([b],'locations.xlsx'); _f._central=true; handleLocFile(_f); } catch (e) {} })
-    .catch(function () {});
+  fetchWithVisitorToken(LOCATIONS_URL + bust).then(function (r) {
+    if (!r.ok) throw new Error('locations ' + r.status);
+    return r.json();
+  }).then(function (arr) {
+    applySignedInLocations(arr);
+  }).catch(function () {});
   fetchVisitorWorkbookBlob()
     .then(function (res) {
       try { var _f=new File([res.blob],'visitor.xlsx'); _f._central=true; handleFile(_f); } catch (e) {}
       loadVisitorFreshness(res.source);
     })
-    .catch(function () { setVisitorFreshness('bad', 'Visitor figures could not be loaded from the Function App or fallback workbook.'); });
+    .catch(function () { setVisitorFreshness('bad', 'Visitor figures need a current Microsoft sign-in.'); });
 }
 
 var OPP_CENTRAL_SNAPS = {};
@@ -3578,9 +3596,9 @@ function getWeekBaseline() {
 function loadCentralSnapshots() {
   // Shared bucket history from Function storage: weekly counts (Last Week / Last Two Week)
   // plus a per-unit baseline (_units) used for day-over-day movement arrows. Same for everyone.
-  fetch(BUCKETS_CENTRAL_URL + '?t=' + Date.now())
+  if (!oppCrmToken) return;
+  fetchWithVisitorToken(BUCKETS_CENTRAL_URL + '?t=' + Date.now())
     .then(function (r) { if (!r.ok) throw 0; return r.json(); })
-    .catch(function () { return fetch('buckets.json?t=' + Date.now()).then(function (r) { if (!r.ok) throw 0; return r.json(); }); })
     .then(function (j) {
       j = j || {};
       OPP_BASELINE_UNITS = (j._units && Object.keys(j._units).length) ? j._units : (function(){ try { return JSON.parse(localStorage.getItem('VBD_BASELINE')||'null') || {}; } catch(e){ return {}; } })();
@@ -3968,6 +3986,8 @@ async function signOutUser() {
 
 async function goLiveOpps() {
   await acquireOppCrmToken();
+  if (typeof loadCentralData === 'function') loadCentralData();
+  if (typeof loadCentralSnapshots === 'function') loadCentralSnapshots();
   await loadLiveOpportunities();
   startOppAutoRefresh();
   if (typeof refreshProjectBookings === 'function') refreshProjectBookings();
