@@ -850,7 +850,8 @@ const WORKS_LINK_SITES = new Set(['THE8','SOUTH RESIDENCE','NORTH RESIDENCE','MA
 const WORKS_LINK_PROJECT = new URLSearchParams(location.search).get('project');
 let SELECTED_PROJECT = WORKS_LINK_SITES.has(String(WORKS_LINK_PROJECT||'').toUpperCase())
   ? WORKS_LINK_PROJECT.toUpperCase() : 'BALQIS RESIDENCE';
-let CURRENT_BUILDINGS = new Set(['BALQIS BLOCK A','BALQIS BLOCK B','BALQIS BLOCK C','BALQIS VILLAS']);
+let CURRENT_BUILDINGS = SELECTED_PROJECT === 'BALQIS RESIDENCE'
+  ? new Set(['BALQIS BLOCK A','BALQIS BLOCK B','BALQIS BLOCK C','BALQIS VILLAS']) : new Set();
 let ALL_LOC = [];
 let ALL_VMS = [];
 let PROJECT_BUILDINGS = {};
@@ -960,6 +961,8 @@ function buildProjectMap() {
     var wlset = {}; WL.forEach(function (w) { wlset[norm(w)] = true; });
     var names = Object.keys(PROJECT_BUILDINGS).filter(function (p) { return wlset[norm(p)]; }).sort();
     if (names.indexOf('BALQIS RESIDENCE') < 0) names.unshift('BALQIS RESIDENCE');
+    // Keep a validated deep link visible while the signed-in location master loads.
+    if (names.indexOf(SELECTED_PROJECT) < 0) names.push(SELECTED_PROJECT);
     sel.innerHTML = names.map(function (p) { return '<option value="' + p.replace(/"/g,'&quot;') + '"' + (p === SELECTED_PROJECT ? ' selected' : '') + '>' + p + '</option>'; }).join('');
   }
 }
