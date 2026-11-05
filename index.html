@@ -2202,11 +2202,9 @@ function teleRecentDates() {
   var anchor;
   if (maxd) { anchor = new Date(maxd + 'T00:00:00Z'); }
   else { anchor = new Date(Date.now() + 4 * 3600 * 1000); anchor.setUTCDate(anchor.getUTCDate() - 1); }
-  // last 3 COMPLETE days: the Live App feeds same-day check-ins, so the data can contain
-  // today — but a day still in progress reads as a low count. Cap the window at yesterday (Dubai).
-  var yd = new Date(Date.now() + 4 * 3600 * 1000); yd.setUTCDate(yd.getUTCDate() - 1);
-  var ydIso = yd.toISOString().slice(0, 10);
-  if (anchor.toISOString().slice(0, 10) > ydIso) anchor = new Date(ydIso + 'T00:00:00Z');
+  // Include today's published check-ins, but never show a future-dated window.
+  var todayIso = new Date(Date.now() + 4 * 3600 * 1000).toISOString().slice(0, 10);
+  if (anchor.toISOString().slice(0, 10) > todayIso) anchor = new Date(todayIso + 'T00:00:00Z');
   anchor.setUTCDate(anchor.getUTCDate() - (TELE_OFFSET * 3));
   var ds = [];
   for (var i = 0; i < 3; i++) { var d = new Date(anchor); d.setUTCDate(d.getUTCDate() - i); ds.push(d.toISOString().slice(0, 10)); }
