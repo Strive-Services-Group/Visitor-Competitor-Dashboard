@@ -842,7 +842,16 @@ const VISITOR_WORKBOOK_URL = 'https://ssg-prpo-proxy-h4cvfegaduftedhz.uaenorth-0
 const VISITOR_FRESHNESS_URL = 'https://ssg-prpo-proxy-h4cvfegaduftedhz.uaenorth-01.azurewebsites.net/api/visitor-data/visitor-freshness.json';
 const BUCKETS_CENTRAL_URL = 'https://pr-po-dashboard-proxy-b4budzexh7eveved.uaenorth-01.azurewebsites.net/api/visitor-data/buckets.json';
 const LOCATIONS_URL = 'https://pr-po-dashboard-proxy-b4budzexh7eveved.uaenorth-01.azurewebsites.net/api/visitor-data/locations.json';
-const VISITOR_STALE_MINUTES = 90;
+// The proxy publishes at 08:00 Dubai (08:30/08:50 retries) and 13:30 Dubai.
+// Allow the scheduled run to finish before declaring its last good file stale.
+function visitorNextPublishDeadline(lastPublishedUtc) {
+  var day = new Date(lastPublishedUtc + 4 * 3600000).toISOString().slice(0, 10);
+  var morning = Date.parse(day + 'T04:00:00Z');
+  var afternoon = Date.parse(day + 'T09:30:00Z');
+  if (lastPublishedUtc < morning) return Date.parse(day + 'T05:00:00Z');
+  if (lastPublishedUtc < afternoon) return Date.parse(day + 'T10:00:00Z');
+  return Date.parse(day + 'T05:00:00Z') + 86400000;
+}
 const MY_COMPANY = 'S & C BUILDING MAINTENANCE L.L.C';
 const BALQIS_BUILDINGS = new Set(['BALQIS BLOCK A','BALQIS BLOCK B','BALQIS BLOCK C','BALQIS VILLAS']);
 // The daily works card links to the exact site's existing visitor view.
@@ -3484,7 +3493,6 @@ function setVisitorFreshness(kind, text) {
 function renderVisitorFreshness(info, sourceLabel) {
   var takenAt = info && (info.takenAtUtc || info.updatedAtUtc || info.generatedAtUtc);
   var ts = takenAt ? Date.parse(takenAt) : NaN;
-  var staleAfter = Number((info && info.staleAfterMinutes) || VISITOR_STALE_MINUTES);
   var totalRows = info && Number(info.totalRows || info.total || 0);
   if (isNaN(ts)) {
     setVisitorFreshness('warn', 'Visitor figures loaded from ' + sourceLabel + ', but the freshness stamp is unavailable.');
@@ -3493,7 +3501,7 @@ function renderVisitorFreshness(info, sourceLabel) {
   var ageMinutes = Math.floor((Date.now() - ts) / 60000);
   var stamp = visitorFreshnessTextDate(takenAt);
   var countText = totalRows ? ' · ' + totalRows.toLocaleString() + ' rows' : '';
-  if (ageMinutes > staleAfter) {
+  if (Date.now() > visitorNextPublishDeadline(ts)) {
     setVisitorFreshness('warn', 'Visitor figures stale: last refreshed ' + stamp + ' Dubai (' + ageMinutes + ' minutes ago)' + countText + '.');
   } else {
     setVisitorFreshness('ok', 'Visitor figures refreshed ' + stamp + ' Dubai (' + ageMinutes + ' minutes ago)' + countText + '.');
